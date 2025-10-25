@@ -16,10 +16,11 @@ from core.version_manager import get_version_manager
 from utils.logger import log_error
 
 # 导入拆分的功能模块
-from ui.main_window import (
-    UICreators, EventHandlers, BuildManagers,
-    LogManagers, Helpers
-)
+from ui.main_window.ui_creators import UICreators
+from ui.main_window.event_handlers import EventHandlers
+from ui.main_window.build_managers import BuildManagers
+from ui.main_window.log_managers import LogManagers
+from ui.main_window.helpers import Helpers
 
 
 class MainWindow(QMainWindow):
@@ -38,15 +39,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"WinPE制作管理器 v{current_version}")
         self.setMinimumSize(1200, 800)
 
-        # 设置窗口图标
-        self.set_window_icon()
-
         # 初始化功能模块
         self.ui_creators = UICreators(self)
         self.event_handlers = EventHandlers(self)
         self.build_managers = BuildManagers(self)
         self.log_managers = LogManagers(self)
         self.helpers = Helpers(self)
+
+        # 设置窗口图标
+        self.set_window_icon()
 
         # 初始化界面
         self.init_ui()

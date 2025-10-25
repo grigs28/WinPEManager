@@ -160,7 +160,7 @@ docs/
 
 # Tests (to be excluded as requested)
 tests/
-
+Desktop/
 # Claude configuration (to be excluded as requested)
 CLAUDE.md
 

@@ -10,7 +10,7 @@ from .helpers import Helpers
 
 __all__ = [
     'UICreators',
-    'EventHandlers', 
+    'EventHandlers',
     'BuildManagers',
     'LogManagers',
     'Helpers'

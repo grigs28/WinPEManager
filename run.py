@@ -83,7 +83,7 @@ def main():
         print(f"启动程序时发生错误: {e}")
         import traceback
         traceback.print_exc()
-        input("按回车键退出...")
+        #input("按回车键退出...")
         return 1
 
 if __name__ == "__main__":

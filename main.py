@@ -8,6 +8,7 @@ WinPE制作管理程序主入口
 import sys
 import os
 import logging
+import importlib.util
 from pathlib import Path
 
 # 添加项目根目录到Python路径
@@ -18,7 +19,15 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTranslator, QLocale
 from PyQt5.QtGui import QIcon
 
-from ui.main_window import MainWindow
+# 使用importlib直接导入main_window.py模块文件
+main_window_spec = importlib.util.spec_from_file_location(
+    "main_window_module", 
+    project_root / "ui" / "main_window.py"
+)
+main_window_module = importlib.util.module_from_spec(main_window_spec)
+main_window_spec.loader.exec_module(main_window_module)
+MainWindow = main_window_module.MainWindow
+
 from utils.logger import setup_logger
 from core.config_manager import ConfigManager
 from core.simple_icon import get_icon_manager, set_random_icon
