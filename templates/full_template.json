@@ -1,0 +1,50 @@
+{
+  "name": "完整功能 WinPE",
+  "description": "包含所有常用功能的完整WinPE环境",
+  "version": "1.0",
+  "winpe_config": {
+    "architecture": "amd64",
+    "version": "10",
+    "language": "zh-cn"
+  },
+  "packages": [
+    "WinPE-WMI",
+    "WinPE-NetFx",
+    "WinPE-PowerShell",
+    "WinPE-DismCmdlets",
+    "WinPE-SecureStartup",
+    "WinPE-StorageWMI",
+    "WinPE-HTA",
+    "WinPE-RSAT"
+  ],
+  "drivers": [],
+  "scripts": [
+    {
+      "path": "scripts/example_startup.bat",
+      "description": "启动时执行的初始化脚本"
+    },
+    {
+      "path": "scripts/example_tools.ps1",
+      "description": "PowerShell工具集"
+    }
+  ],
+  "files": [],
+  "features": {
+    "network": true,
+    "powershell": true,
+    "wmi": true,
+    "dotnet": true,
+    "storage": true,
+    "secure_startup": true,
+    "hta": true,
+    "remote_admin": true
+  },
+  "target_size": "800MB",
+  "use_case": [
+    "完整系统维护",
+    "网络诊断修复",
+    "系统部署",
+    "数据恢复",
+    "远程管理"
+  ]
+}

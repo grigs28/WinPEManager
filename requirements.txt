@@ -1,0 +1,16 @@
+# WinPE制作管理程序依赖包
+# 核心依赖
+PyQt5>=5.15.0
+PyQt5-stubs>=5.15.0
+
+# 系统相关
+pywin32>=227; sys_platform == "win32"
+
+# 文件处理
+pathlib2>=2.3.6; python_version < "3.4"
+
+# 日志和配置
+configparser>=5.0.0
+
+# 编码处理
+chardet>=4.0.0

@@ -1,0 +1,28 @@
+{
+  "name": "最小化 WinPE",
+  "description": "仅包含基本功能的轻量级WinPE",
+  "version": "1.0",
+  "winpe_config": {
+    "architecture": "amd64",
+    "version": "10",
+    "language": "zh-cn"
+  },
+  "packages": [],
+  "drivers": [],
+  "scripts": [],
+  "files": [],
+  "features": {
+    "network": false,
+    "powershell": false,
+    "wmi": false,
+    "dotnet": false,
+    "storage": false,
+    "secure_startup": false
+  },
+  "target_size": "300MB",
+  "use_case": [
+    "基本系统维护",
+    "磁盘分区",
+    "文件备份恢复"
+  ]
+}

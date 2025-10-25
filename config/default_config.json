@@ -1,0 +1,48 @@
+{
+  "winpe": {
+    "architecture": "amd64",
+    "version": "10",
+    "language": "zh-cn",
+    "base_winpe": "winpe.wim"
+  },
+  "adk": {
+    "install_path": "",
+    "winpe_path": ""
+  },
+  "output": {
+    "iso_path": "",
+    "usb_path": "",
+    "workspace": ""
+  },
+  "customization": {
+    "drivers": [],
+    "packages": [],
+    "scripts": [],
+    "files": []
+  },
+  "ui": {
+    "window_geometry": "",
+    "window_state": "",
+    "recent_projects": []
+  },
+  "advanced": {
+    "dism": {
+      "custom_path": "",
+      "verify_components": false,
+      "cleanup_temp": true
+    },
+    "build": {
+      "enable_cache": true,
+      "cache_path": "",
+      "parallel_processing": false,
+      "max_threads": 4
+    },
+    "logging": {
+      "verbose": false,
+      "save_commands": true
+    },
+    "experimental": {
+      "enabled": false
+    }
+  }
+}

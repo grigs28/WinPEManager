@@ -1,0 +1,32 @@
+{
+  "winpe": {
+    "architecture": "amd64",
+    "version": "11",
+    "language": "zh-TW",
+    "base_winpe": "winpe.wim",
+    "build_method": "copype",
+    "enable_winpe_settings": false,
+    "scratch_space_mb": 128,
+    "target_path": "X:"
+  },
+  "adk": {
+    "install_path": "",
+    "winpe_path": ""
+  },
+  "output": {
+    "iso_path": "D:/APP/WinPEManager/output/WinPE.iso",
+    "usb_path": "",
+    "workspace": "D:/APP/WinPEManager/WinPE_amd64"
+  },
+  "customization": {
+    "drivers": [],
+    "packages": [],
+    "scripts": [],
+    "files": []
+  },
+  "ui": {
+    "window_geometry": "",
+    "window_state": "",
+    "recent_projects": []
+  }
+}
