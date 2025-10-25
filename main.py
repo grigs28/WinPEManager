@@ -67,11 +67,25 @@ def main():
     try:
         # 设置日志
         log_file = project_root / "logs" / "winpe_manager.log"
-        setup_logger(log_file)
+        build_log_path = project_root / "logs" / "build_logs"
+        
+        # 使用增强的日志系统
+        setup_logger(
+            log_file_path=log_file,
+            enable_system_log=True,
+            enable_build_log=True,
+            build_log_path=build_log_path,
+            app_name="WinPEManager",
+            context={"app_version": "1.0.0", "startup_time": "now"}
+        )
 
         # 确保必要的目录存在
         for dir_name in ["logs", "output", "config", "drivers", "scripts", "templates"]:
             (project_root / dir_name).mkdir(exist_ok=True)
+
+        # 记录应用程序启动
+        from utils.logger import log_system_event
+        log_system_event("应用程序启动", "WinPE管理器应用程序已启动", "info")
 
         # 初始化配置管理器
         config_manager = ConfigManager()
@@ -90,6 +104,14 @@ def main():
         logging.error(f"程序启动失败: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # 尝试记录启动错误到系统日志
+        try:
+            from utils.logger import log_system_event
+            log_system_event("应用程序启动失败", f"程序启动失败: {str(e)}", "error")
+        except:
+            pass  # 如果日志系统也无法工作，则忽略
+            
         return 1
 
 

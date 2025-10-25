@@ -22,6 +22,20 @@ from core.winpe import (
     BootManager
 )
 
+# 导入增强的日志功能
+try:
+    from utils.logger import (
+        log_build_step,
+        log_system_event,
+        log_command,
+        start_build_session,
+        end_build_session,
+        update_log_context
+    )
+    ENHANCED_LOGGING_AVAILABLE = True
+except ImportError:
+    ENHANCED_LOGGING_AVAILABLE = False
+
 logger = logging.getLogger("WinPEManager")
 
 
@@ -255,22 +269,64 @@ class WinPEBuilder:
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
+        build_info = {
+            "architecture": self.config.get("winpe.architecture", "amd64"),
+            "language": self.config.get("winpe.language", "en-US"),
+            "iso_path": iso_path or "默认路径",
+            "timestamp": logger.handlers[0].formatter.formatTime(logger.makeRecord(
+                "WinPEManager", logging.INFO, "", 0, "", (), None
+            )) if logger.handlers else "未知"
+        }
+        
+        # 开始构建会话
+        if ENHANCED_LOGGING_AVAILABLE:
+            start_build_session(build_info)
+            log_system_event("WinPE构建", "开始完整的WinPE构建流程", "info")
+            update_log_context(build_phase="complete_build")
+        
         try:
             # 1. 初始化工作空间
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("初始化工作空间", "开始初始化构建工作空间")
+            
             success, message = self.initialize_workspace()
             if not success:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("初始化工作空间", f"失败: {message}", "error")
+                    end_build_session(False, f"初始化工作空间失败: {message}")
                 return False, f"初始化工作空间失败: {message}"
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("初始化工作空间", "工作空间初始化成功")
 
             # 2. 复制基础WinPE文件
             architecture = self.config.get("winpe.architecture", "amd64")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("复制基础文件", f"架构: {architecture}")
+            
             success, message = self.copy_base_winpe(architecture)
             if not success:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("复制基础文件", f"失败: {message}", "error")
+                    end_build_session(False, f"复制基础WinPE失败: {message}")
                 return False, f"复制基础WinPE失败: {message}"
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("复制基础文件", "基础WinPE文件复制成功")
 
             # 3. 挂载WinPE镜像
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("挂载镜像", "开始挂载WinPE镜像")
+            
             success, message = self.mount_winpe_image()
             if not success:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("挂载镜像", f"失败: {message}", "error")
+                    end_build_session(False, f"挂载WinPE镜像失败: {message}")
                 return False, f"挂载WinPE镜像失败: {message}"
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("挂载镜像", "WinPE镜像挂载成功")
 
             # 4. 添加可选组件（包含自动语言包）
             packages = self.config.get("customization.packages", [])
@@ -284,6 +340,10 @@ class WinPEBuilder:
             logger.info(f"🔍 检查语言配置: {current_language}")
             logger.info(f"   查找语言包: {current_language}")
             logger.info(f"   找到的语言包: {language_packages if language_packages else '无'}")
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("语言配置", f"当前语言: {current_language}")
+                log_build_step("语言包检查", f"找到语言包: {len(language_packages) if language_packages else 0} 个")
 
             if language_packages:
                 # 将语言包添加到组件列表中
@@ -298,46 +358,108 @@ class WinPEBuilder:
                 logger.info(f"   添加语言包数: {added_packages}")
                 logger.info(f"   最终组件数: {len(packages)}")
                 logger.info(f"   语言包列表: {', '.join(language_packages)}")
+                
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("语言包添加", f"添加了 {added_packages} 个语言包")
             else:
                 logger.info(f"ℹ️ 语言 {current_language} 无需额外的语言支持包")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("语言包检查", f"语言 {current_language} 无需额外语言包")
 
             if packages:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("添加可选组件", f"准备添加 {len(packages)} 个组件")
+                
                 success, message = self.add_packages(packages)
                 if not success:
                     logger.warning(f"添加可选组件失败: {message}")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("添加可选组件", f"失败: {message}", "warning")
+                else:
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("添加可选组件", f"成功添加 {len(packages)} 个组件")
 
             # 5. 添加驱动程序
             drivers = [driver.get("path", "") for driver in self.config.get("customization.drivers", [])]
             if drivers:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("添加驱动程序", f"准备添加 {len(drivers)} 个驱动")
+                
                 success, message = self.add_drivers(drivers)
                 if not success:
                     logger.warning(f"添加驱动程序失败: {message}")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("添加驱动程序", f"失败: {message}", "warning")
+                else:
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("添加驱动程序", f"成功添加 {len(drivers)} 个驱动")
 
             # 6. 设置系统语言和区域设置
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("语言设置", "配置系统语言和区域设置")
+            
             success, message = self.configure_language_settings()
             if not success:
                 logger.warning(f"设置语言配置失败: {message}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("语言设置", f"失败: {message}", "warning")
+            else:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("语言设置", "语言和区域设置配置成功")
 
             # 7. 添加文件和脚本
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("添加文件脚本", "添加额外文件和脚本")
+            
             success, message = self.add_files_and_scripts()
             if not success:
                 logger.warning(f"添加文件和脚本失败: {message}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("添加文件脚本", f"失败: {message}", "warning")
+            else:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("添加文件脚本", "文件和脚本添加成功")
 
             # 8. 卸载并提交更改
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("卸载镜像", "卸载镜像并提交更改")
+            
             success, message = self.unmount_winpe_image(discard=False)
             if not success:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("卸载镜像", f"失败: {message}", "error")
+                    end_build_session(False, f"卸载WinPE镜像失败: {message}")
                 return False, f"卸载WinPE镜像失败: {message}"
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("卸载镜像", "镜像卸载成功，更改已提交")
 
             # 9. 创建ISO文件
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("创建ISO", f"开始创建ISO文件: {iso_path or '默认路径'}")
+            
             success, message = self.create_bootable_iso(iso_path)
             if not success:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("创建ISO", f"失败: {message}", "error")
+                    end_build_session(False, f"创建ISO文件失败: {message}")
                 return False, f"创建ISO文件失败: {message}"
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("创建ISO", "ISO文件创建成功")
+                log_system_event("WinPE构建完成", "完整的WinPE构建流程成功完成", "info")
+                end_build_session(True, "WinPE构建完成")
 
             return True, "WinPE构建完成"
 
         except Exception as e:
             error_msg = f"WinPE构建过程中发生错误: {str(e)}"
             logger.error(error_msg)
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("构建异常", error_msg, "error")
+                log_system_event("WinPE构建异常", error_msg, "error")
+                end_build_session(False, error_msg)
+            
             # 尝试清理挂载的镜像
             if self.current_build_path:
                 self.unmount_winpe_image(discard=True)

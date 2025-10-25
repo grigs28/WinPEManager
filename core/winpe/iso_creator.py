@@ -12,6 +12,13 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import logging
 
+# 导入增强的日志功能
+try:
+    from utils.logger import log_build_step, log_system_event, log_command
+    ENHANCED_LOGGING_AVAILABLE = True
+except ImportError:
+    ENHANCED_LOGGING_AVAILABLE = False
+
 logger = logging.getLogger("WinPEManager")
 
 
@@ -37,21 +44,38 @@ class ISOCreator:
             if not current_build_path:
                 return False, "工作空间未初始化"
 
+            # 记录ISO创建开始
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("ISO创建开始", f"目标路径: {iso_path or '默认路径'}")
+                log_system_event("ISO创建", "开始创建可启动ISO文件", "info")
+
             # 确保镜像已卸载（ISO创建前必须卸载）
             logger.info("ISO创建前检查镜像挂载状态...")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("检查挂载状态", "验证镜像是否已卸载")
+            
             mount_dir = current_build_path / "mount"
             if mount_dir.exists() and any(mount_dir.iterdir()):
                 logger.info("检测到镜像仍处于挂载状态，正在卸载...")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("卸载镜像", "检测到挂载状态，执行卸载操作")
+                
                 from .mount_manager import MountManager
                 mount_manager = MountManager(self.config, self.adk, self.parent_callback)
                 unmount_success, unmount_msg = mount_manager.unmount_winpe_image(current_build_path, discard=False)
                 if not unmount_success:
                     logger.warning(f"卸载镜像失败: {unmount_msg}")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("卸载镜像", f"卸载失败: {unmount_msg}", "warning")
                     # 继续执行，但发出警告
                 else:
                     logger.info("✅ 镜像已成功卸载")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("卸载镜像", "镜像卸载成功")
             else:
                 logger.info("镜像未挂载，可直接进行ISO创建")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("检查挂载状态", "镜像未挂载，可直接创建ISO")
 
             if iso_path is None:
                 iso_path = self.config.get("output.iso_path", "")
@@ -68,12 +92,19 @@ class ISOCreator:
             
             if build_method == "copype":
                 logger.info("🚀 使用MakeWinPEMedia工具创建ISO（copype模式）")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("选择创建方式", "使用MakeWinPEMedia工具（copype模式）")
                 return self._create_iso_with_makewinpe_media(current_build_path, iso_path)
             else:
                 logger.info("🔧 使用Oscdimg工具创建ISO（传统DISM模式）")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("选择创建方式", "使用Oscdimg工具（传统DISM模式）")
+                
                 # 查找Oscdimg工具
                 oscdimg_path = self._find_oscdimg()
                 if not oscdimg_path:
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("查找工具", "找不到Oscdimg工具", "error")
                     return False, "找不到Oscdimg工具"
 
                 return self._create_iso_with_oscdimg(current_build_path, iso_path, oscdimg_path)
@@ -81,6 +112,9 @@ class ISOCreator:
         except Exception as e:
             error_msg = f"创建ISO时发生错误: {str(e)}"
             logger.error(error_msg)
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("ISO创建错误", error_msg, "error")
+                log_system_event("ISO创建错误", error_msg, "error")
             return False, error_msg
 
     def _create_iso_with_oscdimg(self, current_build_path: Path, iso_path: Path, oscdimg_path: Path) -> Tuple[bool, str]:
@@ -255,24 +289,35 @@ class ISOCreator:
             logger.info("使用MakeWinPEMedia创建ISO文件...")
             logger.info(f"源目录: {current_build_path}")
             logger.info(f"目标ISO: {iso_path}")
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("MakeWinPEMedia创建", f"源目录: {current_build_path}, 目标: {iso_path}")
 
             # 查找MakeWinPEMedia.cmd
             makewinpe_path = self._find_makewinpe_media()
             if not makewinpe_path:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("查找工具", "找不到MakeWinPEMedia工具", "error")
                 return False, "找不到MakeWinPEMedia工具"
 
             # 检查源目录结构
             media_path = current_build_path / "media"
             if not media_path.exists():
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("检查源目录", f"缺少media目录: {media_path}", "error")
                 return False, f"源目录中缺少media目录: {media_path}"
 
             # 检查boot.wim文件
             boot_wim = media_path / "sources" / "boot.wim"
             if not boot_wim.exists():
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("检查boot.wim", f"找不到boot.wim文件: {boot_wim}", "error")
                 return False, f"找不到boot.wim文件: {boot_wim}"
 
             wim_size = boot_wim.stat().st_size / (1024 * 1024)  # MB
             logger.info(f"✅ boot.wim文件已就绪，大小: {wim_size:.1f} MB")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("检查boot.wim", f"文件就绪，大小: {wim_size:.1f} MB")
 
             # 创建输出目录
             iso_path.parent.mkdir(parents=True, exist_ok=True)
@@ -280,11 +325,15 @@ class ISOCreator:
             # 如果目标ISO文件已存在，删除它
             if iso_path.exists():
                 logger.info(f"删除已存在的ISO文件: {iso_path}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("清理文件", f"删除已存在的ISO文件: {iso_path}")
                 iso_path.unlink()
 
             # 构建MakeWinPEMedia命令
             cmd = [str(makewinpe_path), "/iso", str(current_build_path), str(iso_path)]
             logger.info(f"执行命令: {' '.join(cmd)}")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_command(" ".join(cmd), "MakeWinPEMedia创建ISO")
 
             # 设置环境变量，确保能找到oscdimg
             old_path = os.environ.get('PATH', '')
@@ -309,19 +358,29 @@ class ISOCreator:
             stderr = safe_decode(result.stderr)
 
             logger.info(f"MakeWinPEMedia返回码: {result.returncode}")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("执行结果", f"MakeWinPEMedia返回码: {result.returncode}")
 
             if result.returncode == 0:
                 logger.info("✅ MakeWinPEMedia执行成功")
                 if stdout:
                     logger.info(f"输出: {stdout}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("MakeWinPEMedia成功", "工具执行成功")
+                    log_system_event("ISO创建", "MakeWinPEMedia执行成功", "info")
 
                 # 验证生成的ISO文件
                 if iso_path.exists():
                     size_mb = iso_path.stat().st_size / (1024 * 1024)
                     logger.info(f"✅ ISO文件创建成功: {iso_path}")
                     logger.info(f"📊 ISO文件大小: {size_mb:.1f} MB")
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("ISO验证", f"文件创建成功，大小: {size_mb:.1f} MB")
+                        log_system_event("ISO创建完成", f"ISO文件创建成功: {iso_path} ({size_mb:.1f}MB)", "info")
                     return True, f"ISO创建成功 ({size_mb:.1f}MB)"
                 else:
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("ISO验证", "ISO文件未生成", "error")
                     return False, "ISO文件未生成"
             else:
                 logger.error(f"❌ MakeWinPEMedia执行失败")
@@ -329,11 +388,17 @@ class ISOCreator:
                     logger.error(f"错误输出: {stderr}")
                 if stdout:
                     logger.error(f"标准输出: {stdout}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("MakeWinPEMedia失败", f"返回码: {result.returncode}", "error")
+                    log_system_event("ISO创建失败", f"MakeWinPEMedia失败 (返回码: {result.returncode})", "error")
                 return False, f"MakeWinPEMedia失败 (返回码: {result.returncode})"
 
         except Exception as e:
             error_msg = f"使用MakeWinPEMedia创建ISO失败: {str(e)}"
             logger.error(error_msg)
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("MakeWinPEMedia异常", error_msg, "error")
+                log_system_event("ISO创建异常", error_msg, "error")
             return False, error_msg
 
     def _find_oscdimg(self) -> Optional[Path]:
@@ -363,6 +428,10 @@ class ISOCreator:
             logger.info(f"执行Oscdimg命令")
             logger.info(f"工具路径: {oscdimg_path}")
             logger.info(f"命令参数: {' '.join(args)}")
+            
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_command(" ".join(cmd), "Oscdimg创建ISO")
+                log_build_step("Oscdimg执行", f"工具: {oscdimg_path}, 参数: {' '.join(args)}")
 
             # 检查源目录和目标文件
             if len(args) >= 2:
@@ -370,11 +439,16 @@ class ISOCreator:
                 target_file = args[-1]
                 logger.info(f"源目录: {source_dir}")
                 logger.info(f"目标文件: {target_file}")
+                
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("检查路径", f"源目录: {source_dir}, 目标: {target_file}")
 
                 # 验证源目录
                 if not Path(source_dir).exists():
                     error_msg = f"源目录不存在: {source_dir}"
                     logger.error(error_msg)
+                    if ENHANCED_LOGGING_AVAILABLE:
+                        log_build_step("验证源目录", error_msg, "error")
                     return False, "", error_msg
 
                 # 检查目标目录权限
@@ -394,6 +468,8 @@ class ISOCreator:
 
             duration = time.time() - start_time
             logger.info(f"Oscdimg命令执行耗时: {duration:.1f} 秒")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("执行耗时", f"Oscdimg命令执行耗时: {duration:.1f} 秒")
 
             # 使用编码工具处理输出
             from utils.encoding import safe_decode
@@ -402,11 +478,16 @@ class ISOCreator:
 
             success = result.returncode == 0
             logger.info(f"返回码: {result.returncode}")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("执行结果", f"Oscdimg返回码: {result.returncode}")
 
             if success:
                 logger.info("Oscdimg命令执行成功")
                 if stdout:
                     logger.info(f"标准输出: {stdout.strip()}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("Oscdimg成功", "命令执行成功")
+                    log_system_event("ISO创建", "Oscdimg命令执行成功", "info")
 
                 # 验证生成的ISO文件
                 if len(args) >= 2:
@@ -415,8 +496,13 @@ class ISOCreator:
                         size_mb = iso_path.stat().st_size / (1024 * 1024)
                         logger.info(f"ISO文件生成成功: {iso_path}")
                         logger.info(f"ISO文件大小: {size_mb:.1f} MB")
+                        if ENHANCED_LOGGING_AVAILABLE:
+                            log_build_step("ISO验证", f"文件生成成功，大小: {size_mb:.1f} MB")
+                            log_system_event("ISO创建完成", f"ISO文件创建成功: {iso_path} ({size_mb:.1f}MB)", "info")
                     else:
                         logger.warning(f"ISO文件未生成: {iso_path}")
+                        if ENHANCED_LOGGING_AVAILABLE:
+                            log_build_step("ISO验证", f"ISO文件未生成: {iso_path}", "warning")
             else:
                 logger.error(f"Oscdimg命令执行失败")
                 logger.error(f"返回码: {result.returncode}")
@@ -424,22 +510,37 @@ class ISOCreator:
                     logger.error(f"错误输出: {stderr.strip()}")
                 if stdout:
                     logger.info(f"标准输出: {stdout.strip()}")
+                
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("Oscdimg失败", f"返回码: {result.returncode}", "error")
+                    log_system_event("ISO创建失败", f"Oscdimg命令失败 (返回码: {result.returncode})", "error")
 
                 # 提供错误分析
+                error_analysis = ""
                 if result.returncode == 1:
-                    logger.error("返回码1通常表示参数错误或帮助信息")
+                    error_analysis = "返回码1通常表示参数错误或帮助信息"
+                    logger.error(error_analysis)
                 elif result.returncode == 2:
-                    logger.error("返回码2通常表示文件不存在或访问被拒绝")
+                    error_analysis = "返回码2通常表示文件不存在或访问被拒绝"
+                    logger.error(error_analysis)
                 elif result.returncode == 3:
-                    logger.error("返回码3通常表示磁盘空间不足")
+                    error_analysis = "返回码3通常表示磁盘空间不足"
+                    logger.error(error_analysis)
                 else:
-                    logger.error(f"未知返回码: {result.returncode}")
+                    error_analysis = f"未知返回码: {result.returncode}"
+                    logger.error(error_analysis)
+                
+                if ENHANCED_LOGGING_AVAILABLE and error_analysis:
+                    log_build_step("错误分析", error_analysis, "error")
 
             return success, stdout, stderr
 
         except Exception as e:
             error_msg = f"执行Oscdimg命令时发生错误: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("Oscdimg异常", error_msg, "error")
+                log_system_event("ISO创建异常", error_msg, "error")
             return False, "", error_msg
 
     def _find_makewinpe_media(self) -> Optional[Path]:
