@@ -135,6 +135,28 @@ class EventHandlers:
         except Exception as e:
             log_error(e, "浏览ISO路径")
 
+    def browse_adk_path(self):
+        """浏览ADK路径"""
+        try:
+            directory = QFileDialog.getExistingDirectory(
+                self.main_window, "选择ADK安装目录", self.main_window.adk_path_edit.text()
+            )
+            if directory:
+                self.main_window.adk_path_edit.setText(directory)
+        except Exception as e:
+            log_error(e, "浏览ADK路径")
+
+    def browse_winpe_path(self):
+        """浏览WinPE路径"""
+        try:
+            directory = QFileDialog.getExistingDirectory(
+                self.main_window, "选择WinPE路径", self.main_window.winpe_path_edit.text()
+            )
+            if directory:
+                self.main_window.winpe_path_edit.setText(directory)
+        except Exception as e:
+            log_error(e, "浏览WinPE路径")
+
     def save_basic_config(self):
         """保存基本配置"""
         try:

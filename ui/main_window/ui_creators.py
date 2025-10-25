@@ -33,17 +33,22 @@ class UICreators:
 
         # WinPE基本配置组
         basic_group = QGroupBox("WinPE 基本配置")
-        basic_layout = QFormLayout(basic_group)
+        basic_layout = QVBoxLayout(basic_group)
 
+        # 架构和版本在同一行，各占50%
+        arch_version_layout = QHBoxLayout()
+        
         # 架构选择
+        arch_version_layout.addWidget(QLabel("架构:"))
         self.main_window.arch_combo = QComboBox()
         self.main_window.arch_combo.addItems(["amd64", "x86", "arm64"])
         current_arch = self.config_manager.get("winpe.architecture", "amd64")
         index = self.main_window.arch_combo.findText(current_arch)
         if index >= 0:
             self.main_window.arch_combo.setCurrentIndex(index)
-        basic_layout.addRow("架构:", self.main_window.arch_combo)
-
+        arch_version_layout.addWidget(self.main_window.arch_combo)
+        
+        arch_version_layout.addWidget(QLabel("  版本:"))  # 添加间距
         # 版本选择
         self.main_window.version_combo = QComboBox()
         self.main_window.version_combo.addItems(["10", "11"])
@@ -51,50 +56,18 @@ class UICreators:
         index = self.main_window.version_combo.findText(current_version)
         if index >= 0:
             self.main_window.version_combo.setCurrentIndex(index)
-        basic_layout.addRow("版本:", self.main_window.version_combo)
+        arch_version_layout.addWidget(self.main_window.version_combo)
+        
+        # 设置各占50%宽度
+        arch_version_layout.setStretch(1, 1)  # 架构下拉框
+        arch_version_layout.setStretch(3, 1)  # 版本下拉框
+        basic_layout.addLayout(arch_version_layout)
 
-        # 构建设置
-        self.main_window.build_method_combo = QComboBox()
-        self.main_window.build_method_combo.addItems(["copype (推荐)", "传统DISM"])
-        current_build_method = self.config_manager.get("winpe.build_method", "copype")
-        method_map = {"copype": "copype (推荐)", "dism": "传统DISM"}
-        method_text = method_map.get(current_build_method, "copype (推荐)")
-        index = self.main_window.build_method_combo.findText(method_text)
-        if index >= 0:
-            self.main_window.build_method_combo.setCurrentIndex(index)
-        basic_layout.addRow("构建方式:", self.main_window.build_method_combo)
-
-        # WinPE专用设置
-        settings_group = QGroupBox("WinPE 专用设置")
-        settings_layout = QFormLayout()
-
-        # 启用WinPE设置
-        self.main_window.enable_winpe_settings_check = QCheckBox("启用 WinPE 专用设置")
-        self.main_window.enable_winpe_settings_check.setChecked(
-            self.config_manager.get("winpe.enable_winpe_settings", True)
-        )
-        settings_layout.addRow("", self.main_window.enable_winpe_settings_check)
-
-        # 暂存空间设置
-        self.main_window.scratch_space_spin = QSpinBox()
-        self.main_window.scratch_space_spin.setRange(32, 1024)
-        self.main_window.scratch_space_spin.setValue(
-            self.config_manager.get("winpe.scratch_space_mb", 128)
-        )
-        self.main_window.scratch_space_spin.setSuffix(" MB")
-        settings_layout.addRow("暂存空间:", self.main_window.scratch_space_spin)
-
-        # 目标路径设置
-        self.main_window.target_path_edit = QLineEdit()
-        self.main_window.target_path_edit.setText(
-            self.config_manager.get("winpe.target_path", "X:")
-        )
-        settings_layout.addRow("目标路径:", self.main_window.target_path_edit)
-
-        settings_group.setLayout(settings_layout)
-        basic_layout.addRow(settings_group)
-
+        # 语言和构建方式在同一行，各占50%
+        lang_build_layout = QHBoxLayout()
+        
         # 语言选择
+        lang_build_layout.addWidget(QLabel("语言:"))
         self.main_window.language_combo = QComboBox()
         # 从WinPE包管理器获取可用语言
         from core.winpe_packages import WinPEPackages
@@ -112,7 +85,66 @@ class UICreators:
 
         # 连接语言变化信号
         self.main_window.language_combo.currentTextChanged.connect(self.main_window.on_language_changed)
-        basic_layout.addRow("语言:", self.main_window.language_combo)
+        lang_build_layout.addWidget(self.main_window.language_combo)
+        
+        lang_build_layout.addWidget(QLabel("  方式:"))  # 添加间距
+        # 构建设置
+        self.main_window.build_method_combo = QComboBox()
+        self.main_window.build_method_combo.addItems(["copype (推荐)", "传统DISM"])
+        current_build_method = self.config_manager.get("winpe.build_method", "copype")
+        method_map = {"copype": "copype (推荐)", "dism": "传统DISM"}
+        method_text = method_map.get(current_build_method, "copype (推荐)")
+        index = self.main_window.build_method_combo.findText(method_text)
+        if index >= 0:
+            self.main_window.build_method_combo.setCurrentIndex(index)
+        lang_build_layout.addWidget(self.main_window.build_method_combo)
+        
+        # 设置各占50%宽度
+        lang_build_layout.setStretch(1, 1)  # 语言下拉框
+        lang_build_layout.setStretch(3, 1)  # 构建方式下拉框
+        basic_layout.addLayout(lang_build_layout)
+
+        # WinPE专用设置 - 启用Winpe专用配置、暂存控件、目标路径占满1行各33%
+        settings_group = QGroupBox("WinPE 专用设置")
+        settings_layout = QVBoxLayout(settings_group)
+
+        # 三个控件在同一行，各占33%
+        settings_row_layout = QHBoxLayout()
+        
+        # 启用WinPE设置
+        self.main_window.enable_winpe_settings_check = QCheckBox("启用 WinPE 专用设置")
+        self.main_window.enable_winpe_settings_check.setChecked(
+            self.config_manager.get("winpe.enable_winpe_settings", True)
+        )
+        settings_row_layout.addWidget(self.main_window.enable_winpe_settings_check)
+
+        # 暂存空间设置
+        settings_row_layout.addWidget(QLabel("暂存空间:"))
+        self.main_window.scratch_space_spin = QSpinBox()
+        self.main_window.scratch_space_spin.setRange(32, 1024)
+        self.main_window.scratch_space_spin.setValue(
+            self.config_manager.get("winpe.scratch_space_mb", 128)
+        )
+        self.main_window.scratch_space_spin.setSuffix(" MB")
+        settings_row_layout.addWidget(self.main_window.scratch_space_spin)
+
+        # 目标路径设置
+        settings_row_layout.addWidget(QLabel("目标路径:"))
+        self.main_window.target_path_edit = QLineEdit()
+        self.main_window.target_path_edit.setText(
+            self.config_manager.get("winpe.target_path", "X:")
+        )
+        settings_row_layout.addWidget(self.main_window.target_path_edit)
+        
+        # 设置各占33%宽度
+        settings_row_layout.setStretch(0, 1)  # 启用WinPE设置
+        settings_row_layout.setStretch(2, 1)  # 暂存空间
+        settings_row_layout.setStretch(4, 1)  # 目标路径
+        
+        settings_layout.addLayout(settings_row_layout)
+        settings_group.setLayout(settings_layout)
+        basic_layout.addWidget(settings_group)
+
 
         layout.addWidget(basic_group)
 
@@ -156,13 +188,33 @@ class UICreators:
         config_group = QGroupBox("ADK 配置")
         config_layout = QFormLayout(config_group)
 
+        # ADK路径行 - 文本框和浏览按钮在同一行
+        adk_layout = QHBoxLayout()
         self.main_window.adk_path_edit = QLineEdit()
         self.main_window.adk_path_edit.setReadOnly(True)
-        config_layout.addRow("ADK 路径:", self.main_window.adk_path_edit)
+        adk_layout.addWidget(self.main_window.adk_path_edit)
+        
+        adk_btn = QPushButton("浏览...")
+        adk_btn.clicked.connect(self.main_window.browse_adk_path)
+        apply_3d_button_style(adk_btn)  # 应用蓝色立体样式
+        adk_btn.setMaximumWidth(80)  # 限制按钮宽度
+        adk_layout.addWidget(adk_btn)
+        
+        config_layout.addRow("ADK 路径:", adk_layout)
 
+        # WinPE路径行 - 文本框和浏览按钮在同一行
+        winpe_layout = QHBoxLayout()
         self.main_window.winpe_path_edit = QLineEdit()
         self.main_window.winpe_path_edit.setReadOnly(True)
-        config_layout.addRow("WinPE 路径:", self.main_window.winpe_path_edit)
+        winpe_layout.addWidget(self.main_window.winpe_path_edit)
+        
+        winpe_btn = QPushButton("浏览...")
+        winpe_btn.clicked.connect(self.main_window.browse_winpe_path)
+        apply_3d_button_style(winpe_btn)  # 应用蓝色立体样式
+        winpe_btn.setMaximumWidth(80)  # 限制按钮宽度
+        winpe_layout.addWidget(winpe_btn)
+        
+        config_layout.addRow("WinPE 路径:", winpe_layout)
 
         layout.addWidget(config_group)
 

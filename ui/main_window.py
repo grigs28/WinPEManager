@@ -137,6 +137,14 @@ class MainWindow(QMainWindow):
         """浏览ISO输出路径"""
         self.event_handlers.browse_iso_path()
 
+    def browse_adk_path(self):
+        """浏览ADK路径"""
+        self.event_handlers.browse_adk_path()
+
+    def browse_winpe_path(self):
+        """浏览WinPE路径"""
+        self.event_handlers.browse_winpe_path()
+
     def save_basic_config(self):
         """保存基本配置"""
         self.event_handlers.save_basic_config()
