@@ -629,25 +629,35 @@ class MainWindow(QMainWindow):
         output_group = QGroupBox("输出配置")
         output_layout = QFormLayout(output_group)
 
+        # 工作空间行 - 文本框和浏览按钮在同一行
+        workspace_layout = QHBoxLayout()
         self.workspace_edit = QLineEdit()
         self.workspace_edit.setText(self.config_manager.get("output.workspace", ""))
         self.workspace_edit.setPlaceholderText("选择WinPE构建工作空间")
-        output_layout.addRow("工作空间:", self.workspace_edit)
-
+        workspace_layout.addWidget(self.workspace_edit)
+        
         workspace_btn = QPushButton("浏览...")
         workspace_btn.clicked.connect(self.browse_workspace)
         apply_3d_button_style(workspace_btn)  # 应用蓝色立体样式
-        output_layout.addRow("", workspace_btn)
+        workspace_btn.setMaximumWidth(80)  # 限制按钮宽度
+        workspace_layout.addWidget(workspace_btn)
+        
+        output_layout.addRow("工作空间:", workspace_layout)
 
+        # ISO路径行 - 文本框和浏览按钮在同一行
+        iso_layout = QHBoxLayout()
         self.iso_path_edit = QLineEdit()
         self.iso_path_edit.setText(self.config_manager.get("output.iso_path", ""))
         self.iso_path_edit.setPlaceholderText("选择ISO输出路径")
-        output_layout.addRow("ISO 路径:", self.iso_path_edit)
-
+        iso_layout.addWidget(self.iso_path_edit)
+        
         iso_btn = QPushButton("浏览...")
         iso_btn.clicked.connect(self.browse_iso_path)
         apply_3d_button_style(iso_btn)  # 应用蓝色立体样式
-        output_layout.addRow("", iso_btn)
+        iso_btn.setMaximumWidth(80)  # 限制按钮宽度
+        iso_layout.addWidget(iso_btn)
+        
+        output_layout.addRow("ISO 路径:", iso_layout)
 
         layout.addWidget(output_group)
 
@@ -676,43 +686,44 @@ class MainWindow(QMainWindow):
         self.adk_details_label.setWordWrap(True)
         adk_layout.addWidget(self.adk_details_label)
 
-        # 按钮布局
-        btn_layout = QHBoxLayout()
+        # ADK状态组 - 移除按钮，按钮将在底部统一处理
+        layout.addWidget(adk_group)
 
+        # 添加弹性空间，将按钮推到底部
+        layout.addStretch()
+
+        # 创建统一的按钮行布局 - 放在最底部
+        unified_btn_layout = QHBoxLayout()
+
+        # ADK状态按钮
         refresh_btn = QPushButton("刷新状态")
         refresh_btn.clicked.connect(self.check_adk_status)
         apply_3d_button_style(refresh_btn)  # 应用蓝色立体样式
-        btn_layout.addWidget(refresh_btn)
+        unified_btn_layout.addWidget(refresh_btn)
 
         test_dism_btn = QPushButton("测试DISM工具")
         test_dism_btn.clicked.connect(self.test_dism_tool)
         apply_3d_button_style(test_dism_btn)  # 应用蓝色立体样式
-        btn_layout.addWidget(test_dism_btn)
-
-        adk_layout.addLayout(btn_layout)
-
-        layout.addWidget(adk_group)
+        unified_btn_layout.addWidget(test_dism_btn)
 
         # 关于和帮助按钮
-        about_btn_layout = QHBoxLayout()
-
         about_btn = QPushButton("关于程序")
         about_btn.clicked.connect(self.show_about_dialog)
         apply_3d_button_style(about_btn)  # 应用蓝色立体样式
-        about_btn_layout.addWidget(about_btn)
+        unified_btn_layout.addWidget(about_btn)
 
         changelog_btn = QPushButton("更新日志")
         changelog_btn.clicked.connect(self.show_changelog_dialog)
         apply_3d_button_style(changelog_btn)  # 应用蓝色立体样式
-        about_btn_layout.addWidget(changelog_btn)
-
-        layout.addLayout(about_btn_layout)
+        unified_btn_layout.addWidget(changelog_btn)
 
         # 保存配置按钮
         save_btn = QPushButton("保存基本配置")
         save_btn.clicked.connect(self.save_basic_config)
         apply_3d_button_style_alternate(save_btn)  # 应用绿色立体样式
-        layout.addWidget(save_btn)
+        unified_btn_layout.addWidget(save_btn)
+
+        layout.addLayout(unified_btn_layout)
 
         layout.addStretch()
         self.tab_widget.addTab(widget, "基本配置")
