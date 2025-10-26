@@ -11,6 +11,7 @@ import subprocess
 import platform
 import ctypes
 from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
 
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt
@@ -219,7 +220,7 @@ class BuildManagers:
             log_error(e, "停止构建")
 
     def refresh_builds_list(self):
-        """刷新已构建目录列表"""
+        """按照WIM管理逻辑刷新已构建目录中的WIM文件列表"""
         try:
             self.main_window.builds_list.clear()
 
@@ -228,106 +229,324 @@ class BuildManagers:
             if not workspace.exists():
                 workspace = Path.cwd() / "workspace" / "WinPE_Build"
 
-            # 查找所有WinPE构建目录
+            # 按照WIM管理的逻辑扫描所有构建目录中的WIM文件
             if workspace.exists():
-                winpe_builds = []
-                for item in workspace.iterdir():
-                    if item.is_dir() and item.name.startswith("WinPE_"):
-                        try:
-                            # 获取目录创建时间
-                            create_time = item.stat().st_ctime
-                            create_dt = datetime.datetime.fromtimestamp(create_time)
+                all_wim_files = self._scan_wim_files_from_build_dirs(workspace)
 
-                            # 检查目录大小和文件数量
-                            file_count = len(list(item.rglob("*")))
-                            
-                            # 检查WinPE镜像文件（支持copype和传统DISM模式）
-                            media_path = item / "media"
-                            boot_wim = media_path / "sources" / "boot.wim" if media_path.exists() else None
-                            winpe_wim = item / "winpe.wim"  # 传统DISM模式
-                            
-                            # 检查是否有有效的WinPE镜像文件
-                            has_wim = False
-                            if boot_wim and boot_wim.exists():
-                                has_wim = True  # copype模式
-                            elif winpe_wim and winpe_wim.exists():
-                                has_wim = True  # 传统DISM模式
-                            
-                            has_iso = any(item.glob("*.iso"))
-
-                            # 确定构建模式
-                            build_mode = "copype" if (boot_wim and boot_wim.exists()) else "dism"
-                            
-                            build_info = {
-                                "path": item,
-                                "name": item.name,
-                                "date": create_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                "file_count": file_count,
-                                "has_wim": has_wim,
-                                "has_iso": has_iso,
-                                "build_mode": build_mode,
-                                "size_mb": self._get_directory_size(item) / 1024 / 1024
-                            }
-                            winpe_builds.append(build_info)
-                        except Exception as e:
-                            from utils.logger import logger
-                            logger.warning(f"读取构建目录信息失败 {item}: {str(e)}")
-
-                # 按创建时间排序
-                winpe_builds.sort(key=lambda x: x["date"], reverse=True)
+                # 按修改时间排序
+                all_wim_files.sort(key=lambda x: x["build_dir"].stat().st_mtime, reverse=True)
 
                 # 添加到列表
-                for build in winpe_builds:
-                    status_parts = []
-                    if build["has_wim"]:
-                        status_parts.append("WIM")
-                    if build["has_iso"]:
-                        status_parts.append("ISO")
+                for wim_file in all_wim_files:
+                    # 计算文件大小
+                    size_mb = wim_file["size"] / (1024 * 1024)
+                    size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
 
-                    status = "已就绪" if status_parts else "不完整"
-                    if status_parts:
-                        status += f" ({', '.join(status_parts)})"
+                    # 状态文本
+                    status_text = "已挂载" if wim_file["mount_status"] else "未挂载"
 
-                    # 优化显示格式：使用更简洁的日期和状态格式
-                    date_short = build['date'].split(' ')[1][:5]  # 只显示时间 HH:MM
-                    size_short = f"{build['size_mb']:.0f}MB" if build['size_mb'] >= 1 else f"{build['size_mb']*1024:.0f}KB"
+                    # 构建目录信息
+                    build_dir_name = wim_file["build_dir"].name
+                    import datetime
+                    ctime = wim_file["build_dir"].stat().st_ctime
+                    time_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
 
-                    # 创建主要显示文本（包含构建模式）
-                    mode_text = "copype" if build.get('build_mode') == 'copype' else "dism"
-                    main_text = f"{build['name']} - {date_short} - {size_short} - {status} ({mode_text})"
+                    # WIM相对路径
+                    wim_relative_path = str(wim_file["path"]).replace(str(wim_file["build_dir"]), "").lstrip("\\/")
+
+                    # 为已挂载项添加图标
+                    display_name = wim_file['name']
+                    if wim_file["mount_status"] and not display_name.startswith("📂 "):
+                        display_name = f"📂 {display_name}"
+
+                    # 创建显示文本
+                    item_text = f"{display_name} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {wim_relative_path}"
 
                     from PyQt5.QtWidgets import QListWidgetItem
-                    list_item = QListWidgetItem(main_text)
-                    list_item.setData(Qt.UserRole, build["path"])
+                    list_item = QListWidgetItem(item_text)
+                    list_item.setData(Qt.UserRole, wim_file)
 
-                    # 设置工具提示显示完整信息
+                    # 设置增强的工具提示，仿照WIM管理的格式
                     tooltip_info = (
-                        f"完整名称: {build['name']}\n"
-                        f"创建时间: {build['date']}\n"
-                        f"目录大小: {build['size_mb']:.1f} MB\n"
-                        f"文件数量: {build['file_count']} 个\n"
-                        f"构建模式: {build.get('build_mode', 'unknown')}\n"
-                        f"状态: {status}\n"
-                        f"路径: {build['path']}"
+                        f"WIM文件: {wim_file['name']}\n"
+                        f"─────────────────\n"
+                        f"构建目录: {build_dir_name}\n"
+                        f"创建时间: {time_str}\n"
+                        f"文件大小: {size_str}\n"
+                        f"文件类型: {wim_file['type'].upper()}\n"
+                        f"挂载状态: {status_text}\n"
+                        f"相对路径: {wim_relative_path}\n"
+                        f"─────────────────\n"
+                        f"完整路径: {wim_file['path']}\n"
+                        f"构建目录: {wim_file['build_dir']}"
                     )
                     list_item.setToolTip(tooltip_info)
 
-                    # 根据状态设置不同的颜色
-                    if status.startswith("已就绪"):
-                        list_item.setForeground(QColor("#2e7d32"))  # 绿色 - 已就绪
-                    elif build['has_wim']:
-                        list_item.setForeground(QColor("#f57c00"))  # 橙色 - 部分完成
+                    # 设置状态样式，仿照WIM管理的逻辑
+                    if wim_file["mount_status"]:
+                        # 已挂载项使用绿色背景和图标
+                        list_item.setBackground(QColor("#E8F5E8"))
+                        list_item.setForeground(QColor("#2E7D32"))  # 深绿色文字
+                        list_item.setData(Qt.UserRole + 1, "mounted")
                     else:
-                        list_item.setForeground(QColor("#d32f2f"))  # 红色 - 不完整
+                        # 未挂载项使用默认样式
+                        list_item.setForeground(QColor("#333333"))  # 深灰色文字
+                        list_item.setData(Qt.UserRole + 1, "unmounted")
 
                     self.main_window.builds_list.addItem(list_item)
 
             if self.main_window.builds_list.count() == 0:
-                self.main_window.builds_list.addItem("暂无已构建的目录")
+                self.main_window.builds_list.addItem("暂无WIM映像文件")
 
         except Exception as e:
             from utils.logger import log_error
-            log_error(e, "刷新构建目录列表")
+            log_error(e, "刷新构建目录WIM文件列表")
+
+    def _scan_wim_files_from_build_dirs(self, root_dir: Path) -> List[Dict]:
+        """递归扫描目录中的所有WIM文件，完全仿照WIM管理的逻辑"""
+        wim_files = []
+
+        try:
+            # 首先获取所有构建目录（以WinPE_开头的目录）
+            build_dirs = []
+            for item in root_dir.iterdir():
+                if item.is_dir() and item.name.startswith("WinPE_"):
+                    build_dirs.append(item)
+
+            # 为每个构建目录扫描WIM文件
+            for build_dir in build_dirs:
+                wim_files.extend(self._scan_wim_files_in_build_dir(build_dir))
+
+            # 也扫描其他位置的WIM文件（比如旧的构建格式）
+            for item in root_dir.rglob("*"):
+                if item.is_file() and item.suffix.lower() == '.wim':
+                    # 检查是否已经在构建目录中处理过
+                    already_processed = False
+                    for wim_file in wim_files:
+                        if str(item) == str(wim_file["path"]):
+                            already_processed = True
+                            break
+
+                    if not already_processed:
+                        # 确定WIM文件类型
+                        wim_type = self._determine_wim_type(item)
+
+                        # 获取构建目录（WIM文件所在的上级目录）
+                        build_dir = self._find_build_dir_for_wim(item)
+
+                        if build_dir:
+                            wim_files.append({
+                                "path": item,
+                                "name": item.name,
+                                "type": wim_type,
+                                "size": item.stat().st_size,
+                                "mount_status": self._check_mount_status({"path": str(item)}),
+                                "build_dir": build_dir
+                            })
+                        else:
+                            # 如果找不到构建目录，使用文件所在目录
+                            wim_files.append({
+                                "path": item,
+                                "name": item.name,
+                                "type": wim_type,
+                                "size": item.stat().st_size,
+                                "mount_status": False,  # 默认未挂载
+                                "build_dir": item.parent
+                            })
+
+        except Exception as e:
+            from utils.logger import log_error
+            log_error(e, f"递归扫描WIM文件: {root_dir}")
+
+        return wim_files
+
+    def _find_build_dir_for_wim(self, wim_path: Path) -> Optional[Path]:
+        """为WIM文件找到对应的构建目录，仿照WIM管理的逻辑"""
+        try:
+            # 如果是boot.wim，构建目录是上上级目录
+            if wim_path.name.lower() == "boot.wim":
+                # 路径应该是: build_dir/media/sources/boot.wim
+                if "sources" in str(wim_path) and "media" in str(wim_path):
+                    return wim_path.parent.parent.parent
+                else:
+                    # 如果路径格式不标准，尝试找到WinPE_开头的目录
+                    current = wim_path.parent
+                    while current != current.parent:
+                        if current.name.startswith("WinPE_"):
+                            return current
+                        current = current.parent
+
+            # 如果是winpe.wim，构建目录是上级目录
+            elif wim_path.name.lower() == "winpe.wim":
+                return wim_path.parent
+
+            # 对于其他WIM文件，尝试找到包含WinPE_的上级目录
+            current = wim_path.parent
+            while current != current.parent:  # 避免无限循环
+                if current.name.startswith("WinPE_"):
+                    return current
+                current = current.parent
+
+            # 如果没找到WinPE_目录，尝试其他常见的构建目录结构
+            # 检查是否有media目录
+            media_dir = wim_path.parent / "media"
+            if media_dir.exists():
+                return wim_path.parent
+
+            # 检查是否有mount目录
+            mount_dir = wim_path.parent / "mount"
+            if mount_dir.exists():
+                return wim_path.parent
+
+            # 如果没找到，返回文件所在目录
+            return wim_path.parent
+
+        except Exception:
+            return wim_path.parent
+
+    def _scan_wim_files_in_build_dir(self, build_dir: Path) -> List[Dict]:
+        """扫描特定构建目录中的WIM文件，仿照WIM管理的逻辑"""
+        wim_files = []
+
+        try:
+            # 检查构建目录是否存在
+            if not build_dir.exists():
+                return wim_files
+
+            # 扫描boot.wim（在media/sources目录下）
+            boot_wim_path = build_dir / "media" / "sources" / "boot.wim"
+            if boot_wim_path.exists():
+                wim_files.append({
+                    "path": boot_wim_path,
+                    "name": boot_wim_path.name,
+                    "type": "copype",
+                    "size": boot_wim_path.stat().st_size,
+                    "mount_status": self._check_mount_status({"path": str(item)}),
+                    "build_dir": build_dir
+                })
+
+            # 扫描winpe.wim（在构建目录根目录下）
+            winpe_wim_path = build_dir / "winpe.wim"
+            if winpe_wim_path.exists():
+                wim_files.append({
+                    "path": winpe_wim_path,
+                    "name": winpe_wim_path.name,
+                    "type": "dism",
+                    "size": winpe_wim_path.stat().st_size,
+                    "mount_status": self._check_mount_status({"path": str(item)}),
+                    "build_dir": build_dir
+                })
+
+            # 扫描其他WIM文件（递归搜索）
+            for item in build_dir.rglob("*.wim"):
+                # 跳过已经处理过的文件
+                if item.name.lower() in ["boot.wim", "winpe.wim"]:
+                    continue
+
+                # 确定WIM文件类型
+                wim_type = self._determine_wim_type(item)
+
+                wim_files.append({
+                    "path": item,
+                    "name": item.name,
+                    "type": wim_type,
+                    "size": item.stat().st_size,
+                    "mount_status": self._check_mount_status({"path": str(item)}),
+                    "build_dir": build_dir
+                })
+
+        except Exception as e:
+            from utils.logger import log_error
+            log_error(e, f"扫描构建目录WIM文件: {build_dir}")
+
+        return wim_files
+
+    def _determine_wim_type(self, wim_path: Path) -> str:
+        """确定WIM文件类型，仿照WIM管理的逻辑"""
+        try:
+            # 根据文件名和路径判断类型
+            if wim_path.name.lower() == "boot.wim":
+                return "copype"
+            elif wim_path.name.lower() == "winpe.wim":
+                return "dism"
+            elif "sources" in str(wim_path).lower():
+                return "copype"
+            else:
+                return "unknown"
+        except Exception:
+            return "unknown"
+
+    def _check_mount_status(self, wim_file: Dict) -> bool:
+        """检查WIM文件的挂载状态，仿照WIM管理的逻辑"""
+        try:
+            if not wim_file or not wim_file.get("path"):
+                return False
+
+            wim_file_path = Path(wim_file["path"])
+            mount_dir = wim_file_path.parent / "mount"
+            if not mount_dir.exists():
+                return False
+            return bool(list(mount_dir.iterdir()))
+        except Exception:
+            return False
+
+    def on_build_item_double_clicked(self, item):
+        """构建列表项双击事件，仿照WIM管理的逻辑"""
+        try:
+            wim_file = item.data(Qt.UserRole)
+            if not wim_file:
+                return
+
+            # 如果已挂载，打开挂载目录
+            if wim_file["mount_status"]:
+                # 使用WIM文件所在目录的mount子目录
+                wim_file_path = Path(wim_file["path"])
+                mount_dir = wim_file_path.parent / "mount"
+
+                if mount_dir.exists():
+                    # 打开文件管理器
+                    import subprocess
+                    import platform
+
+                    if platform.system() == "Windows":
+                        subprocess.run(['explorer', str(mount_dir)])
+                    elif platform.system() == "Darwin":  # macOS
+                        subprocess.run(['open', str(mount_dir)])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(mount_dir)])
+
+                    self.main_window.log_message(f"已打开挂载目录: {mount_dir}")
+                else:
+                    QMessageBox.warning(self.main_window, "提示", f"挂载目录不存在: {mount_dir}")
+            else:
+                # 如果未挂载，提示用户
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self.main_window, "提示",
+                    f"WIM文件 {wim_file['name']} 未挂载。\n\n是否要打开文件所在的构建目录？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    # 打开WIM文件所在的构建目录
+                    build_dir = wim_file["build_dir"]
+                    import subprocess
+                    import platform
+
+                    if platform.system() == "Windows":
+                        subprocess.run(['explorer', str(build_dir)])
+                    elif platform.system() == "Darwin":  # macOS
+                        subprocess.run(['open', str(build_dir)])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(build_dir)])
+
+                    self.main_window.log_message(f"已打开构建目录: {build_dir}")
+
+        except Exception as e:
+            from utils.logger import log_error
+            log_error(e, "双击构建列表项")
+            QMessageBox.critical(self.main_window, "错误", f"双击操作时发生错误: {str(e)}")
 
     def _get_directory_size(self, directory: Path) -> int:
         """获取目录大小（字节）"""

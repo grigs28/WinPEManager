@@ -37,30 +37,21 @@ class MountManager:
         logger.error("DISM操作需要管理员权限，但当前程序没有管理员权限")
         return False
 
-    def mount_winpe_image(self, current_build_path: Path, wim_file_path: Optional[Path] = None) -> Tuple[bool, str]:
+    def mount_winpe_image(self, wim_file_path: Path) -> Tuple[bool, str]:
         """挂载WinPE镜像
 
         Args:
-            current_build_path: 当前构建路径
-            wim_file_path: 指定的WIM文件路径（可选）
+            wim_file_path: WIM文件路径
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
         try:
-            if not current_build_path:
-                return False, "工作空间未初始化"
+            if not wim_file_path or not wim_file_path.exists():
+                return False, "WIM文件不存在"
 
-            # 确定要挂载的WIM文件
-            if wim_file_path and wim_file_path.exists():
-                wim_file = wim_file_path
-                logger.info(f"使用指定的WIM文件: {wim_file}")
-            else:
-                # 默认挂载boot.wim（既是工作镜像也是启动镜像）
-                wim_file = current_build_path / "media" / "sources" / "boot.wim"
-                logger.info(f"使用默认的boot.wim文件: {wim_file}")
-
-            mount_dir = current_build_path / "mount"
+            wim_file = wim_file_path
+            mount_dir = wim_file.parent / "mount"  # 简化：WIM文件所在目录 + /mount
 
             logger.info(f"准备挂载WIM镜像")
             logger.info(f"镜像文件: {wim_file}")
@@ -207,24 +198,25 @@ class MountManager:
             logger.error(error_msg, exc_info=True)
             return False, error_msg
 
-    def unmount_winpe_image(self, current_build_path: Path, discard: bool = False) -> Tuple[bool, str]:
+    def unmount_winpe_image(self, wim_file_path: Path, discard: bool = False) -> Tuple[bool, str]:
         """卸载WinPE镜像
 
         Args:
-            current_build_path: 当前构建路径
+            wim_file_path: WIM文件路径
             discard: 是否放弃更改
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
         try:
-            if not current_build_path:
-                return False, "工作空间未初始化"
+            if not wim_file_path or not wim_file_path.exists():
+                return False, "WIM文件不存在"
 
-            # 现在挂载的是boot.wim文件
-            mount_dir = current_build_path / "mount"
+            # 简化：WIM文件所在目录 + /mount
+            mount_dir = wim_file_path.parent / "mount"
 
-            logger.info(f"准备卸载boot.wim镜像: {mount_dir}")
+            logger.info(f"准备卸载WIM镜像: {wim_file_path.name}")
+            logger.info(f"挂载目录: {mount_dir}")
 
             if not mount_dir.exists():
                 logger.info("挂载目录不存在，无需卸载")
@@ -294,17 +286,21 @@ class MountManager:
             logger.error(error_msg, exc_info=True)
             return False, error_msg
 
-    def is_mounted(self, current_build_path: Path) -> bool:
+    def is_mounted(self, wim_file_path: Path) -> bool:
         """检查镜像是否已挂载
 
         Args:
-            current_build_path: 当前构建路径
+            wim_file_path: WIM文件路径
 
         Returns:
             bool: 是否已挂载
         """
         try:
-            mount_dir = current_build_path / "mount"
+            if not wim_file_path or not wim_file_path.exists():
+                return False
+
+            # 简化：WIM文件所在目录 + /mount
+            mount_dir = wim_file_path.parent / "mount"
             if not mount_dir.exists():
                 return False
 
@@ -314,19 +310,19 @@ class MountManager:
             logger.error(f"检查挂载状态时发生错误: {str(e)}")
             return False
 
-    def ensure_unmounted(self, current_build_path: Path) -> Tuple[bool, str]:
+    def ensure_unmounted(self, wim_file_path: Path) -> Tuple[bool, str]:
         """确保镜像已卸载，如果已挂载则先卸载
 
         Args:
-            current_build_path: 当前构建路径
+            wim_file_path: WIM文件路径
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
         try:
-            if self.is_mounted(current_build_path):
+            if self.is_mounted(wim_file_path):
                 logger.info("检测到镜像已挂载，正在卸载...")
-                return self.unmount_winpe_image(current_build_path, discard=False)
+                return self.unmount_winpe_image(wim_file_path, discard=False)
             else:
                 logger.info("镜像未挂载，可直接进行后续操作")
                 return True, "镜像未挂载"

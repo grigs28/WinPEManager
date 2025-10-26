@@ -560,6 +560,60 @@ class UICreators:
         self.main_window.builds_list.setSelectionMode(QAbstractItemView.SingleSelection)  # 单选模式
         self.main_window.builds_list.setUniformItemSizes(True)  # 统一项大小
         self.main_window.builds_list.setSpacing(1)  # 设置项间距
+
+        # 连接双击事件
+        self.main_window.builds_list.itemDoubleClicked.connect(self.main_window.build_managers.on_build_item_double_clicked)
+
+        # 应用现代化样式表
+        self.main_window.builds_list.setStyleSheet("""
+            QListWidget {
+                font-family: 'Microsoft YaHei UI', 'SimHei';
+                font-size: 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+                alternate-background-color: #f9f9f9;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+                border-radius: 3px;
+                margin: 1px;
+            }
+            QListWidget::item:selected {
+                background-color: #0078d4;
+                color: white;
+                font-weight: bold;
+                border: 1px solid #005a9e;
+            }
+            QListWidget::item:hover {
+                background-color: #f0f8ff;
+                border: 1px solid #b3d9ff;
+            }
+            /* 已挂载项的特殊样式 */
+            QListWidget::item[state="mounted"] {
+                background-color: #E8F5E8;
+                border: 1px solid #4CAF50;
+                font-weight: 500;
+            }
+            QListWidget::item[state="mounted"]:selected {
+                background-color: #2E7D32;
+                color: white;
+                border: 1px solid #1B5E20;
+            }
+            /* 未挂载项的特殊样式 */
+            QListWidget::item[state="unmounted"] {
+                background-color: white;
+                border: 1px solid #eee;
+                font-weight: normal;
+            }
+            QListWidget::item[state="unmounted"]:selected {
+                background-color: #0078d4;
+                color: white;
+                border: 1px solid #005a9e;
+                font-weight: bold;
+            }
+        """)
         builds_layout.addWidget(self.main_window.builds_list)
         builds_layout.setStretchFactor(self.main_window.builds_list, 1)  # 让列表框占满剩余空间
 

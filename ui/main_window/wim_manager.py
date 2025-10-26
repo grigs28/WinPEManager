@@ -76,7 +76,7 @@ class MountThread(QThread):
             logger.info("开始执行DISM挂载命令")
             self.progress_signal.emit(45)
 
-            success, message = mount_manager.mount_winpe_image(self.build_dir, self.wim_file_path)
+            success, message = mount_manager.mount_winpe_image(self.wim_file_path)
             
             # 阶段6: 验证挂载结果 (85%)
             self.progress_signal.emit(85)
@@ -119,17 +119,18 @@ class MountThread(QThread):
 
 class UnmountThread(QThread):
     """WIM卸载线程"""
-    
+
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
     error_signal = pyqtSignal(str)
-    
-    def __init__(self, config_manager, adk_manager, parent, build_dir, commit=True):
+
+    def __init__(self, config_manager, adk_manager, parent, build_dir, wim_file_path, commit=True):
         super().__init__()
         self.config_manager = config_manager
         self.adk_manager = adk_manager
         self.parent = parent
         self.build_dir = build_dir
+        self.wim_file_path = wim_file_path
         self.commit = commit
         self._is_running = True
     
@@ -179,7 +180,7 @@ class UnmountThread(QThread):
             logger.info("开始执行DISM卸载命令")
             self.progress_signal.emit(45)
             
-            success, message = mount_manager.unmount_winpe_image(self.build_dir, discard=not self.commit)
+            success, message = mount_manager.unmount_winpe_image(self.wim_file_path, discard=not self.commit)
             logger.info(f"unmount_winpe_image 返回结果: success={success}, message={message}")
             
             # 阶段6: 验证卸载结果 (85%)
@@ -564,7 +565,7 @@ class WIMManagerDialog(QDialog):
                                 "name": item.name,
                                 "type": wim_type,
                                 "size": item.stat().st_size,
-                                "mount_status": self.check_mount_status(build_dir),
+                                "mount_status": self.check_mount_status({"path": str(item)}),
                                 "build_dir": build_dir
                             })
                         else:
@@ -600,7 +601,7 @@ class WIMManagerDialog(QDialog):
                     "name": boot_wim_path.name,
                     "type": "copype",
                     "size": boot_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status(build_dir),
+                    "mount_status": self.check_mount_status({"path": str(item)}),
                     "build_dir": build_dir
                 })
 
@@ -612,7 +613,7 @@ class WIMManagerDialog(QDialog):
                     "name": winpe_wim_path.name,
                     "type": "dism",
                     "size": winpe_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status(build_dir),
+                    "mount_status": self.check_mount_status({"path": str(item)}),
                     "build_dir": build_dir
                 })
 
@@ -630,7 +631,7 @@ class WIMManagerDialog(QDialog):
                     "name": item.name,
                     "type": wim_type,
                     "size": item.stat().st_size,
-                    "mount_status": self.check_mount_status(build_dir),
+                    "mount_status": self.check_mount_status({"path": str(item)}),
                     "build_dir": build_dir
                 })
 
@@ -699,10 +700,14 @@ class WIMManagerDialog(QDialog):
             return wim_path.parent
     
     
-    def check_mount_status(self, build_dir: Path) -> bool:
-        """检查构建目录的挂载状态"""
+    def check_mount_status(self, wim_file: Dict) -> bool:
+        """检查WIM文件的挂载状态"""
         try:
-            mount_dir = build_dir / "mount"
+            if not wim_file or not wim_file.get("path"):
+                return False
+
+            wim_file_path = Path(wim_file["path"])
+            mount_dir = wim_file_path.parent / "mount"
             if not mount_dir.exists():
                 return False
             return bool(list(mount_dir.iterdir()))
@@ -820,7 +825,7 @@ class WIMManagerDialog(QDialog):
             build_dir = wim_file["build_dir"]
             
             # 创建卸载线程
-            self.unmount_thread = UnmountThread(self.config_manager, self.adk_manager, self.parent, build_dir, commit)
+            self.unmount_thread = UnmountThread(self.config_manager, self.adk_manager, self.parent, build_dir, wim_file_path, commit)
             self.unmount_thread.progress_signal.connect(progress.setValue)
             self.unmount_thread.finished_signal.connect(self.on_unmount_finished)
             self.unmount_thread.error_signal.connect(self.on_unmount_error)
@@ -1177,9 +1182,9 @@ exit
             
             # 如果已挂载，打开挂载目录
             if wim_file["mount_status"]:
-                # 使用列表框中的构建目录
-                build_dir = wim_file["build_dir"]
-                mount_dir = build_dir / "mount"
+                # 使用WIM文件所在目录的mount子目录
+                wim_file_path = Path(wim_file["path"])
+                mount_dir = wim_file_path.parent / "mount"
                 
                 if mount_dir.exists():
                     # 打开文件管理器
