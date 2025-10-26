@@ -37,11 +37,12 @@ class MountManager:
         logger.error("DISM操作需要管理员权限，但当前程序没有管理员权限")
         return False
 
-    def mount_winpe_image(self, current_build_path: Path) -> Tuple[bool, str]:
+    def mount_winpe_image(self, current_build_path: Path, wim_file_path: Optional[Path] = None) -> Tuple[bool, str]:
         """挂载WinPE镜像
 
         Args:
             current_build_path: 当前构建路径
+            wim_file_path: 指定的WIM文件路径（可选）
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
@@ -50,24 +51,39 @@ class MountManager:
             if not current_build_path:
                 return False, "工作空间未初始化"
 
-            # 挂载boot.wim（既是工作镜像也是启动镜像）
-            wim_file = current_build_path / "media" / "sources" / "boot.wim"
+            # 确定要挂载的WIM文件
+            if wim_file_path and wim_file_path.exists():
+                wim_file = wim_file_path
+                logger.info(f"使用指定的WIM文件: {wim_file}")
+            else:
+                # 默认挂载boot.wim（既是工作镜像也是启动镜像）
+                wim_file = current_build_path / "media" / "sources" / "boot.wim"
+                logger.info(f"使用默认的boot.wim文件: {wim_file}")
+
             mount_dir = current_build_path / "mount"
 
-            logger.info(f"准备挂载boot.wim镜像")
+            logger.info(f"准备挂载WIM镜像")
             logger.info(f"镜像文件: {wim_file}")
             logger.info(f"挂载目录: {mount_dir}")
 
             # 检查WIM文件
             if not wim_file.exists():
-                logger.error(f"boot.wim文件不存在: {wim_file}")
-                return False, f"boot.wim文件不存在: {wim_file}"
+                logger.error(f"WIM文件不存在: {wim_file}")
+                return False, f"WIM文件不存在: {wim_file}"
 
             # 检查WIM文件大小
             wim_size = wim_file.stat().st_size
             logger.info(f"WIM文件大小: {wim_size:,} 字节 ({wim_size/1024/1024:.1f} MB)")
-            if wim_size < 100 * 1024 * 1024:  # 小于100MB可能有问题
-                logger.warning(f"WIM文件大小异常小: {wim_size/1024/1024:.1f} MB，可能复制不完整")
+            # 对于不同类型的WIM文件，使用不同的大小阈值
+            if wim_file.name.lower() == "boot.wim":
+                if wim_size < 100 * 1024 * 1024:  # 小于100MB可能有问题
+                    logger.warning(f"boot.wim文件大小异常小: {wim_size/1024/1024:.1f} MB，可能复制不完整")
+            elif wim_file.name.lower() == "winpe.wim":
+                if wim_size < 200 * 1024 * 1024:  # 小于200MB可能有问题
+                    logger.warning(f"winpe.wim文件大小异常小: {wim_size/1024/1024:.1f} MB，可能复制不完整")
+            else:
+                if wim_size < 50 * 1024 * 1024:  # 小于50MB可能有问题
+                    logger.warning(f"WIM文件大小异常小: {wim_size/1024/1024:.1f} MB，可能复制不完整")
 
             # 清理并创建挂载目录
             if mount_dir.exists():

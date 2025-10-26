@@ -26,17 +26,18 @@ from utils.logger import log_error
 
 class MountThread(QThread):
     """WIM挂载线程"""
-    
+
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
     error_signal = pyqtSignal(str)
-    
-    def __init__(self, config_manager, adk_manager, parent, build_dir):
+
+    def __init__(self, config_manager, adk_manager, parent, build_dir, wim_file_path=None):
         super().__init__()
         self.config_manager = config_manager
         self.adk_manager = adk_manager
         self.parent = parent
         self.build_dir = build_dir
+        self.wim_file_path = wim_file_path
         self._is_running = True
     
     def run(self):
@@ -74,8 +75,8 @@ class MountThread(QThread):
             # 阶段5: 执行挂载操作 (35%-85%)
             logger.info("开始执行DISM挂载命令")
             self.progress_signal.emit(45)
-            
-            success, message = mount_manager.mount_winpe_image(self.build_dir)
+
+            success, message = mount_manager.mount_winpe_image(self.build_dir, self.wim_file_path)
             
             # 阶段6: 验证挂载结果 (85%)
             self.progress_signal.emit(85)
@@ -351,15 +352,23 @@ class WIMManagerDialog(QDialog):
                 border: 1px solid #ccc;
                 border-radius: 4px;
                 background-color: white;
+                alternate-background-color: #f9f9f9;
             }
             QListWidget::item {
                 padding: 8px;
                 border-bottom: 1px solid #eee;
+                border-radius: 3px;
+                margin: 1px;
             }
             QListWidget::item:selected {
                 background-color: #0078d4;
                 color: white;
                 font-weight: bold;
+                border: 1px solid #005a9e;
+            }
+            QListWidget::item:hover {
+                background-color: #f0f8ff;
+                border: 1px solid #b3d9ff;
             }
         """)
         self.wim_list.itemDoubleClicked.connect(self.on_item_double_clicked)
@@ -425,24 +434,90 @@ class WIMManagerDialog(QDialog):
                     mount_path = str(mount_dir)
                 else:
                     mount_path = "未挂载"
-                
-                # 构建目录信息
+
+                # 构建目录信息和相对路径
                 build_dir_name = wim_file["build_dir"].name
+                wim_relative_path = str(wim_file["path"]).replace(str(wim_file["build_dir"]), "").lstrip("\\/")
+
                 import datetime
                 ctime = wim_file["build_dir"].stat().st_ctime
                 time_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
-                
-                item_text = f"{wim_file['name']} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {mount_path}"
-                
+
+                # 为已挂载项添加图标
+                display_name = wim_file['name']
+                if wim_file["mount_status"] and not display_name.startswith("📂 "):
+                    display_name = f"📂 {display_name}"
+
+                item_text = f"{display_name} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {wim_relative_path}"
+
                 list_item = QListWidgetItem(item_text)
                 list_item.setData(Qt.UserRole, wim_file)
-                list_item.setToolTip(f"路径: {wim_file['path']}\n大小: {size_str}\n类型: {wim_file['type'].upper()}\n状态: {status_text}\n构建目录: {build_dir_name} ({time_str})\n挂载位置: {mount_path}")
+                list_item.setToolTip(
+                    f"WIM文件: {wim_file['name']}\n"
+                    f"完整路径: {wim_file['path']}\n"
+                    f"相对路径: {wim_relative_path}\n"
+                    f"大小: {size_str}\n"
+                    f"类型: {wim_file['type'].upper()}\n"
+                    f"状态: {status_text}\n"
+                    f"构建目录: {build_dir_name} ({time_str})\n"
+                    f"挂载位置: {mount_path}"
+                )
                 
-                # 设置状态颜色
+                # 设置状态颜色和样式
                 if wim_file["mount_status"]:
+                    # 已挂载项使用更明显的绿色背景和深色文字
                     list_item.setBackground(QColor("#E8F5E8"))
-                
+                    list_item.setForeground(QColor("#2E7D32"))  # 深绿色文字
+
+                    # 设置自定义样式用于已挂载项
+                    custom_style = """
+                        QListWidget::item {
+                            background-color: #E8F5E8;
+                            border: 1px solid #4CAF50;
+                            font-weight: 500;
+                            padding: 8px;
+                            border-radius: 3px;
+                            margin: 1px;
+                        }
+                        QListWidget::item:selected {
+                            background-color: #2E7D32;
+                            color: white;
+                            border: 1px solid #1B5E20;
+                            font-weight: bold;
+                        }
+                    """
+                    list_item.setData(Qt.UserRole + 1, "mounted")
+                else:
+                    # 未挂载项使用默认样式
+                    list_item.setForeground(QColor("#333333"))  # 深灰色文字
+                    custom_style = """
+                        QListWidget::item {
+                            background-color: white;
+                            border: 1px solid #eee;
+                            font-weight: normal;
+                            padding: 8px;
+                            border-radius: 3px;
+                            margin: 1px;
+                        }
+                        QListWidget::item:selected {
+                            background-color: #0078d4;
+                            color: white;
+                            border: 1px solid #005a9e;
+                            font-weight: bold;
+                        }
+                    """
+                    list_item.setData(Qt.UserRole + 1, "unmounted")
+
                 self.wim_list.addItem(list_item)
+
+                # 应用自定义样式
+                if wim_file["mount_status"]:
+                    # 为已挂载项应用特殊样式
+                    row = self.wim_list.count() - 1
+                    item = self.wim_list.item(row)
+                    if item:
+                        item.setBackground(QColor("#E8F5E8"))
+                        item.setForeground(QColor("#2E7D32"))
             
             if not all_wim_files:
                 self.wim_list.addItem("暂无WIM映像文件")
@@ -454,40 +529,114 @@ class WIMManagerDialog(QDialog):
     def scan_wim_files_recursive(self, root_dir: Path) -> List[Dict]:
         """递归扫描目录中的所有WIM文件"""
         wim_files = []
-        
+
         try:
-            # 递归遍历所有目录
+            # 首先获取所有构建目录（以WinPE_开头的目录）
+            build_dirs = []
+            for item in root_dir.iterdir():
+                if item.is_dir() and item.name.startswith("WinPE_"):
+                    build_dirs.append(item)
+
+            # 为每个构建目录扫描WIM文件
+            for build_dir in build_dirs:
+                wim_files.extend(self.scan_wim_files_in_build_dir(build_dir))
+
+            # 也扫描其他位置的WIM文件（比如旧的构建格式）
             for item in root_dir.rglob("*"):
                 if item.is_file() and item.suffix.lower() == '.wim':
-                    # 确定WIM文件类型
-                    wim_type = self.determine_wim_type(item)
-                    
-                    # 获取构建目录（WIM文件所在的上级目录）
-                    build_dir = self.find_build_dir_for_wim(item)
-                    
-                    if build_dir:
-                        wim_files.append({
-                            "path": item,
-                            "name": item.name,
-                            "type": wim_type,
-                            "size": item.stat().st_size,
-                            "mount_status": self.check_mount_status(build_dir),
-                            "build_dir": build_dir
-                        })
-                    else:
-                        # 如果找不到构建目录，使用文件所在目录
-                        wim_files.append({
-                            "path": item,
-                            "name": item.name,
-                            "type": wim_type,
-                            "size": item.stat().st_size,
-                            "mount_status": False,  # 默认未挂载
-                            "build_dir": item.parent
-                        })
-        
+                    # 检查是否已经在构建目录中处理过
+                    already_processed = False
+                    for wim_file in wim_files:
+                        if str(item) == str(wim_file["path"]):
+                            already_processed = True
+                            break
+
+                    if not already_processed:
+                        # 确定WIM文件类型
+                        wim_type = self.determine_wim_type(item)
+
+                        # 获取构建目录（WIM文件所在的上级目录）
+                        build_dir = self.find_build_dir_for_wim(item)
+
+                        if build_dir:
+                            wim_files.append({
+                                "path": item,
+                                "name": item.name,
+                                "type": wim_type,
+                                "size": item.stat().st_size,
+                                "mount_status": self.check_mount_status(build_dir),
+                                "build_dir": build_dir
+                            })
+                        else:
+                            # 如果找不到构建目录，使用文件所在目录
+                            wim_files.append({
+                                "path": item,
+                                "name": item.name,
+                                "type": wim_type,
+                                "size": item.stat().st_size,
+                                "mount_status": False,  # 默认未挂载
+                                "build_dir": item.parent
+                            })
+
         except Exception as e:
             log_error(e, f"递归扫描WIM文件: {root_dir}")
-        
+
+        return wim_files
+
+    def scan_wim_files_in_build_dir(self, build_dir: Path) -> List[Dict]:
+        """扫描特定构建目录中的WIM文件"""
+        wim_files = []
+
+        try:
+            # 检查构建目录是否存在
+            if not build_dir.exists():
+                return wim_files
+
+            # 扫描boot.wim（在media/sources目录下）
+            boot_wim_path = build_dir / "media" / "sources" / "boot.wim"
+            if boot_wim_path.exists():
+                wim_files.append({
+                    "path": boot_wim_path,
+                    "name": boot_wim_path.name,
+                    "type": "copype",
+                    "size": boot_wim_path.stat().st_size,
+                    "mount_status": self.check_mount_status(build_dir),
+                    "build_dir": build_dir
+                })
+
+            # 扫描winpe.wim（在构建目录根目录下）
+            winpe_wim_path = build_dir / "winpe.wim"
+            if winpe_wim_path.exists():
+                wim_files.append({
+                    "path": winpe_wim_path,
+                    "name": winpe_wim_path.name,
+                    "type": "dism",
+                    "size": winpe_wim_path.stat().st_size,
+                    "mount_status": self.check_mount_status(build_dir),
+                    "build_dir": build_dir
+                })
+
+            # 扫描其他WIM文件（递归搜索）
+            for item in build_dir.rglob("*.wim"):
+                # 跳过已经处理过的文件
+                if item.name.lower() in ["boot.wim", "winpe.wim"]:
+                    continue
+
+                # 确定WIM文件类型
+                wim_type = self.determine_wim_type(item)
+
+                wim_files.append({
+                    "path": item,
+                    "name": item.name,
+                    "type": wim_type,
+                    "size": item.stat().st_size,
+                    "mount_status": self.check_mount_status(build_dir),
+                    "build_dir": build_dir
+                })
+
+        except Exception as e:
+            log_error(e, f"扫描构建目录WIM文件: {build_dir}")
+
         return wim_files
     
     def determine_wim_type(self, wim_path: Path) -> str:
@@ -513,21 +662,39 @@ class WIMManagerDialog(QDialog):
                 # 路径应该是: build_dir/media/sources/boot.wim
                 if "sources" in str(wim_path) and "media" in str(wim_path):
                     return wim_path.parent.parent.parent
-            
+                else:
+                    # 如果路径格式不标准，尝试找到WinPE_开头的目录
+                    current = wim_path.parent
+                    while current != current.parent:
+                        if current.name.startswith("WinPE_"):
+                            return current
+                        current = current.parent
+
             # 如果是winpe.wim，构建目录是上级目录
             elif wim_path.name.lower() == "winpe.wim":
                 return wim_path.parent
-            
+
             # 对于其他WIM文件，尝试找到包含WinPE_的上级目录
             current = wim_path.parent
             while current != current.parent:  # 避免无限循环
                 if current.name.startswith("WinPE_"):
                     return current
                 current = current.parent
-            
+
+            # 如果没找到WinPE_目录，尝试其他常见的构建目录结构
+            # 检查是否有media目录
+            media_dir = wim_path.parent / "media"
+            if media_dir.exists():
+                return wim_path.parent
+
+            # 检查是否有mount目录
+            mount_dir = wim_path.parent / "mount"
+            if mount_dir.exists():
+                return wim_path.parent
+
             # 如果没找到，返回文件所在目录
             return wim_path.parent
-            
+
         except Exception:
             return wim_path.parent
     
@@ -584,11 +751,12 @@ class WIMManagerDialog(QDialog):
             progress.setWindowModality(Qt.WindowModal)
             progress.show()
             
-            # 使用列表框中的构建目录
+            # 使用列表框中的构建目录和WIM文件路径
             build_dir = wim_file["build_dir"]
-            
+            wim_file_path = wim_file["path"]
+
             # 创建挂载线程
-            self.mount_thread = MountThread(self.config_manager, self.adk_manager, self.parent, build_dir)
+            self.mount_thread = MountThread(self.config_manager, self.adk_manager, self.parent, build_dir, wim_file_path)
             self.mount_thread.progress_signal.connect(progress.setValue)
             self.mount_thread.finished_signal.connect(self.on_mount_finished)
             self.mount_thread.error_signal.connect(self.on_mount_error)
