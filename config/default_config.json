@@ -1,9 +1,17 @@
 {
   "winpe": {
     "architecture": "amd64",
-    "version": "10",
-    "language": "zh-cn",
-    "base_winpe": "winpe.wim"
+    "version": "11",
+    "language": "zh-CN",
+    "base_winpe": "winpe.wim",
+    "build_method": "copype",
+    "enable_winpe_settings": true,
+    "scratch_space_mb": 128,
+    "target_path": "X:",
+    "desktop_type": "cairo",
+    "desktop_program_path": "",
+    "desktop_directory_path": "",
+    "desktop_auto_download": true
   },
   "adk": {
     "install_path": "",

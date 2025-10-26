@@ -145,6 +145,108 @@ class UICreators:
         settings_group.setLayout(settings_layout)
         basic_layout.addWidget(settings_group)
 
+        # WinPE桌面配置组
+        desktop_group = QGroupBox("WinPE 桌面配置")
+        desktop_layout = QVBoxLayout(desktop_group)
+
+        # 桌面类型选择
+        desktop_type_layout = QHBoxLayout()
+        desktop_type_layout.addWidget(QLabel("桌面环境:"))
+        self.main_window.desktop_type_combo = QComboBox()
+        
+        # 添加桌面选项
+        from core.desktop_manager import DesktopManager
+        desktop_manager = DesktopManager(self.config_manager)
+        desktop_types = desktop_manager.get_desktop_types()
+        
+        for desktop_id, desktop_info in desktop_types.items():
+            display_text = f"{desktop_info['name']} - {desktop_info['description']}"
+            self.main_window.desktop_type_combo.addItem(display_text, desktop_id)
+        
+        # 设置当前选择
+        current_desktop_type = self.config_manager.get("winpe.desktop_type", "cairo")
+        for i in range(self.main_window.desktop_type_combo.count()):
+            if self.main_window.desktop_type_combo.itemData(i) == current_desktop_type:
+                self.main_window.desktop_type_combo.setCurrentIndex(i)
+                break
+        
+        # 连接选择变化信号
+        self.main_window.desktop_type_combo.currentTextChanged.connect(self.main_window.on_desktop_type_changed)
+        desktop_type_layout.addWidget(self.main_window.desktop_type_combo)
+        desktop_layout.addLayout(desktop_type_layout)
+
+        # 程序路径选择
+        program_path_layout = QHBoxLayout()
+        program_path_layout.addWidget(QLabel("程序路径:"))
+        self.main_window.desktop_program_edit = QLineEdit()
+        self.main_window.desktop_program_edit.setText(
+            self.config_manager.get("winpe.desktop_program_path", "")
+        )
+        self.main_window.desktop_program_edit.setPlaceholderText("选择桌面环境主程序")
+        program_path_layout.addWidget(self.main_window.desktop_program_edit)
+        
+        desktop_program_btn = QPushButton("浏览...")
+        desktop_program_btn.clicked.connect(self.main_window.browse_desktop_program)
+        apply_3d_button_style(desktop_program_btn)
+        desktop_program_btn.setMaximumWidth(80)
+        program_path_layout.addWidget(desktop_program_btn)
+        desktop_layout.addLayout(program_path_layout)
+
+        # 目录路径选择
+        directory_path_layout = QHBoxLayout()
+        directory_path_layout.addWidget(QLabel("目录路径:"))
+        self.main_window.desktop_directory_edit = QLineEdit()
+        self.main_window.desktop_directory_edit.setText(
+            self.config_manager.get("winpe.desktop_directory_path", "")
+        )
+        self.main_window.desktop_directory_edit.setPlaceholderText("选择桌面环境目录")
+        directory_path_layout.addWidget(self.main_window.desktop_directory_edit)
+        
+        desktop_directory_btn = QPushButton("浏览...")
+        desktop_directory_btn.clicked.connect(self.main_window.browse_desktop_directory)
+        apply_3d_button_style(desktop_directory_btn)
+        desktop_directory_btn.setMaximumWidth(80)
+        directory_path_layout.addWidget(desktop_directory_btn)
+        desktop_layout.addLayout(directory_path_layout)
+
+        # 桌面状态显示
+        self.main_window.desktop_status_label = QLabel("桌面环境状态: 未配置")
+        self.main_window.desktop_status_label.setStyleSheet("color: #666; font-style: italic;")
+        desktop_layout.addWidget(self.main_window.desktop_status_label)
+
+        # 桌面环境下载链接行 - 放在选择框后面
+        desktop_links_layout = QHBoxLayout()
+        
+        # 下载链接标签
+        desktop_links_layout.addWidget(QLabel("下载地址:"))
+        
+        # Cairo Desktop下载链接
+        self.main_window.cairo_download_link = QLabel('<a href="https://github.com/cairoshell/cairoshell/releases/download/v0.4.407/CairoSetup_64bit.exe" style="color: #2196F3; text-decoration: underline;">Cairo Desktop</a>')
+        self.main_window.cairo_download_link.setOpenExternalLinks(True)
+        self.main_window.cairo_download_link.setToolTip("点击访问 Cairo Desktop 下载页面")
+        desktop_links_layout.addWidget(self.main_window.cairo_download_link)
+        
+        desktop_links_layout.addWidget(QLabel(" | "))
+        
+        # WinXShell下载链接
+        self.main_window.winxshell_download_link = QLabel('<a href="https://www.lanzoux.com/b011xhbsh" style="color: #2196F3; text-decoration: underline;">WinXShell (密码: shell)</a>')
+        self.main_window.winxshell_download_link.setOpenExternalLinks(True)
+        self.main_window.winxshell_download_link.setToolTip("点击访问 WinXShell 蓝奏云下载页面\n提取密码: shell")
+        desktop_links_layout.addWidget(self.main_window.winxshell_download_link)
+        
+        desktop_links_layout.addWidget(QLabel(" | "))
+        
+        # 配置按钮
+        desktop_config_btn = QPushButton("配置")
+        desktop_config_btn.clicked.connect(self.main_window.show_desktop_config_dialog)
+        desktop_config_btn.setMaximumWidth(60)
+        apply_3d_button_style(desktop_config_btn)
+        desktop_links_layout.addWidget(desktop_config_btn)
+        
+        desktop_links_layout.addStretch()
+        desktop_layout.addLayout(desktop_links_layout)
+
+        layout.addWidget(desktop_group)
 
         layout.addWidget(basic_group)
 
@@ -273,6 +375,11 @@ class UICreators:
 
         # 初始化ADK状态
         self.main_window.check_adk_status()
+        
+        # 初始化桌面状态和自动定位
+        self.main_window.event_handlers._update_desktop_status()
+        
+        # 注意：桌面类型切换时也会调用自动定位，这里不需要重复调用
 
     def create_customization_tab(self):
         """创建定制选项标签页"""
@@ -489,12 +596,24 @@ class UICreators:
         control_group = QGroupBox("构建控制")
         control_layout = QVBoxLayout(control_group)
 
+        # 构建按钮行
+        build_btn_layout = QHBoxLayout()
+        
         # 构建按钮
         self.main_window.build_btn = QPushButton("开始构建 WinPE")
         self.main_window.build_btn.setMinimumHeight(50)
         self.main_window.build_btn.clicked.connect(self.main_window.start_build)
         apply_3d_button_style_alternate(self.main_window.build_btn)  # 应用绿色立体样式
-        control_layout.addWidget(self.main_window.build_btn)
+        build_btn_layout.addWidget(self.main_window.build_btn)
+
+        # 制作ISO按钮
+        self.main_window.make_iso_btn = QPushButton("制作ISO")
+        self.main_window.make_iso_btn.setMinimumHeight(50)
+        self.main_window.make_iso_btn.clicked.connect(self.main_window.make_iso_direct)
+        apply_3d_button_style(self.main_window.make_iso_btn)  # 应用蓝色立体样式
+        build_btn_layout.addWidget(self.main_window.make_iso_btn)
+
+        control_layout.addLayout(build_btn_layout)
 
         # 进度条
         self.main_window.progress_bar = QProgressBar()

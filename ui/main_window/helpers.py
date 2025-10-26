@@ -353,6 +353,23 @@ class Helpers:
         else:
             summary_lines.append("WinPE专用设置: 已禁用")
 
+        # 桌面环境配置
+        from core.desktop_manager import DesktopManager
+        desktop_manager = DesktopManager(self.config_manager)
+        desktop_config = desktop_manager.get_current_desktop_config()
+        desktop_type = desktop_config["type"]
+        
+        if desktop_type != "disabled":
+            desktop_name = desktop_config["name"]
+            summary_lines.append(f"桌面环境: {desktop_name}")
+            
+            # 获取桌面状态
+            desktop_info = desktop_manager.get_desktop_info(desktop_type)
+            if desktop_info and desktop_info.get("installed", False):
+                summary_lines.append(f"  状态: 已安装 (版本: {desktop_info.get('version', 'Unknown')})")
+            else:
+                summary_lines.append(f"  状态: 未安装")
+
         packages = self.config_manager.get("customization.packages", [])
         summary_lines.append(f"可选组件: {len(packages)} 个")
 

@@ -611,8 +611,8 @@ class ADKManager:
             result = ctypes.windll.kernel32.GetShortPathNameW(long_path, buf, 260)
             
             if result == 0:
-                # 如果获取失败，返回原路径
-                logger.warning(f"无法获取短文件名: {long_path}")
+                # 如果获取失败，返回原路径（这在现代Windows系统中是正常的）
+                logger.debug(f"无法获取短文件名，使用原路径: {long_path}")
                 return long_path
             else:
                 short_path = buf.value
@@ -620,5 +620,6 @@ class ADKManager:
                 return short_path
                 
         except Exception as e:
-            logger.warning(f"获取短文件名失败: {e}，使用原路径: {long_path}")
+            # 异常时也返回原路径，这在现代Windows系统中是正常的
+            logger.debug(f"获取短文件名失败，使用原路径: {long_path} ({e})")
             return long_path

@@ -176,9 +176,18 @@ class EventHandlers:
             self.config_manager.set("winpe.scratch_space_mb", self.main_window.scratch_space_spin.value())
             self.config_manager.set("winpe.target_path", self.main_window.target_path_edit.text())
 
+            # 保存桌面配置
+            desktop_type = self.main_window.desktop_type_combo.currentData()
+            self.config_manager.set("winpe.desktop_type", desktop_type)
+            self.config_manager.set("winpe.desktop_program_path", self.main_window.desktop_program_edit.text())
+            self.config_manager.set("winpe.desktop_directory_path", self.main_window.desktop_directory_edit.text())
+
             self.config_manager.set("output.workspace", self.main_window.workspace_edit.text())
             self.config_manager.set("output.iso_path", self.main_window.iso_path_edit.text())
+            
+            # 立即保存配置以确保所有设置都被保存
             self.config_manager.save_config()
+            
             self.main_window.status_label.setText("基本配置已保存")
             self.main_window.log_message("基本配置已保存")
             self.main_window.update_build_summary()
@@ -322,3 +331,209 @@ class EventHandlers:
             self.on_package_changed()
         except Exception as e:
             log_error(e, "清空组件选择")
+
+    def auto_detect_desktop_on_startup(self):
+        """程序启动时自动检测桌面环境"""
+        try:
+            from core.desktop_manager import DesktopManager
+            desktop_manager = DesktopManager(self.config_manager)
+            
+            # 获取当前配置的桌面类型
+            current_desktop_type = self.config_manager.get("winpe.desktop_type", "cairo")
+            
+            # 只有在桌面类型未设置时才进行自动检测
+            # 如果用户明确选择了"disabled"，则不进行自动检测
+            if not current_desktop_type:
+                # 检查所有桌面环境类型
+                desktop_types = ["cairo", "winxshell"]
+                detected_desktop = None
+                
+                for desktop_type in desktop_types:
+                    desktop_info = desktop_manager.get_desktop_info(desktop_type)
+                    if desktop_info and desktop_info.get("installed", False):
+                        detected_desktop = desktop_type
+                        self.main_window.log_message(f"🔍 检测到已安装的桌面环境: {desktop_info['name']}")
+                        break
+                
+                # 如果检测到桌面环境，自动设置
+                if detected_desktop:
+                    # 更新下拉框选择
+                    for i in range(self.main_window.desktop_type_combo.count()):
+                        if self.main_window.desktop_type_combo.itemData(i) == detected_desktop:
+                            self.main_window.desktop_type_combo.setCurrentIndex(i)
+                            break
+                    
+                    # 自动定位路径
+                    self._auto_locate_desktop_paths(detected_desktop)
+                    
+                    # 保存配置
+                    self.config_manager.set("winpe.desktop_type", detected_desktop)
+                    self.config_manager.save_config()
+                    
+                    self.main_window.log_message(f"✅ 已自动设置桌面环境为: {desktop_manager.get_desktop_types()[detected_desktop]['name']}")
+                else:
+                    self.main_window.log_message("ℹ️ 未检测到已安装的桌面环境")
+            else:
+                # 如果用户已经配置了桌面环境（包括"disabled"），只进行路径自动定位（如果路径为空）
+                self._auto_locate_desktop_paths(current_desktop_type)
+                
+                if current_desktop_type == "disabled":
+                    self.main_window.log_message("ℹ️ 桌面环境已禁用")
+                else:
+                    desktop_name = desktop_manager.get_desktop_types().get(current_desktop_type, {}).get('name', current_desktop_type)
+                    self.main_window.log_message(f"ℹ️ 使用已配置的桌面环境: {desktop_name}")
+                
+        except Exception as e:
+            log_error(e, "程序启动时自动检测桌面环境")
+
+    def on_desktop_type_changed(self):
+        """桌面类型选择变化事件"""
+        try:
+            # 获取选择的桌面类型
+            desktop_type = self.main_window.desktop_type_combo.currentData()
+            if not desktop_type:
+                return
+
+            # 保存桌面配置
+            self.config_manager.set("winpe.desktop_type", desktop_type)
+
+            # 根据桌面类型启用/禁用控件
+            is_disabled = desktop_type == "disabled"
+            self.main_window.desktop_program_edit.setEnabled(not is_disabled)
+            self.main_window.desktop_directory_edit.setEnabled(not is_disabled)
+
+            # 自动定位程序和目录路径（仅在桌面类型切换时）
+            # 注意：程序启动时的自动定位在auto_detect_desktop_on_startup方法中处理
+
+            # 更新桌面状态显示
+            self._update_desktop_status()
+
+            # 记录日志
+            from core.desktop_manager import DesktopManager
+            desktop_manager = DesktopManager(self.config_manager)
+            desktop_types = desktop_manager.get_desktop_types()
+            desktop_name = desktop_types.get(desktop_type, {}).get("name", "未知")
+            
+            self.main_window.log_message(f"🖥️ 桌面环境已切换到: {desktop_name}")
+
+        except Exception as e:
+            log_error(e, "桌面类型切换")
+
+    def _auto_locate_desktop_paths(self, desktop_type: str):
+        """自动定位桌面环境的程序和目录路径"""
+        try:
+            from core.desktop_manager import DesktopManager
+            desktop_manager = DesktopManager(self.config_manager)
+            
+            # 获取桌面信息
+            desktop_info = desktop_manager.get_desktop_info(desktop_type)
+            if not desktop_info or not desktop_info.get("installed", False):
+                return
+            
+            # 获取当前配置的路径（不是UI控件的值）
+            current_program_path = self.config_manager.get("winpe.desktop_program_path", "").strip()
+            current_directory_path = self.config_manager.get("winpe.desktop_directory_path", "").strip()
+            
+            # 只有在配置路径为空时才自动定位
+            if not current_program_path and desktop_info.get("executable"):
+                self.main_window.desktop_program_edit.setText(desktop_info["executable"])
+                self.config_manager.set("winpe.desktop_program_path", desktop_info["executable"])
+                self.main_window.log_message(f"🔍 自动定位程序路径: {desktop_info['executable']}")
+            else:
+                # 如果配置中已有路径，使用配置的路径
+                self.main_window.desktop_program_edit.setText(current_program_path)
+            
+            if not current_directory_path and desktop_info.get("directory"):
+                self.main_window.desktop_directory_edit.setText(desktop_info["directory"])
+                self.config_manager.set("winpe.desktop_directory_path", desktop_info["directory"])
+                self.main_window.log_message(f"🔍 自动定位目录路径: {desktop_info['directory']}")
+            else:
+                # 如果配置中已有路径，使用配置的路径
+                self.main_window.desktop_directory_edit.setText(current_directory_path)
+                
+        except Exception as e:
+            log_error(e, "自动定位桌面路径")
+
+    def browse_desktop_program(self):
+        """浏览桌面程序路径"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.main_window, "选择桌面环境主程序",
+                self.main_window.desktop_program_edit.text(),
+                "可执行文件 (*.exe);;所有文件 (*.*)"
+            )
+            if file_path:
+                self.main_window.desktop_program_edit.setText(file_path)
+                self.config_manager.set("winpe.desktop_program_path", file_path)
+                self._update_desktop_status()
+        except Exception as e:
+            log_error(e, "浏览桌面程序路径")
+
+    def browse_desktop_directory(self):
+        """浏览桌面目录路径"""
+        try:
+            directory = QFileDialog.getExistingDirectory(
+                self.main_window, "选择桌面环境目录",
+                self.main_window.desktop_directory_edit.text()
+            )
+            if directory:
+                self.main_window.desktop_directory_edit.setText(directory)
+                self.config_manager.set("winpe.desktop_directory_path", directory)
+                self._update_desktop_status()
+        except Exception as e:
+            log_error(e, "浏览桌面目录路径")
+
+    def _update_desktop_status(self):
+        """更新桌面状态显示"""
+        try:
+            from core.desktop_manager import DesktopManager
+            desktop_manager = DesktopManager(self.config_manager)
+            desktop_config = desktop_manager.get_current_desktop_config()
+            
+            desktop_type = desktop_config["type"]
+            desktop_name = desktop_config["name"]
+            
+            if desktop_type == "disabled":
+                status_text = "桌面环境状态: 已禁用"
+                self.main_window.desktop_status_label.setStyleSheet("color: #666; font-style: italic;")
+            else:
+                # 获取桌面信息
+                desktop_info = desktop_manager.get_desktop_info(desktop_type)
+                if desktop_info and desktop_info.get("installed", False):
+                    status_text = f"桌面环境状态: {desktop_name} 已安装 (版本: {desktop_info.get('version', 'Unknown')}, 大小: {desktop_info.get('size_mb', 0)} MB)"
+                    self.main_window.desktop_status_label.setStyleSheet("color: #2e7d32; font-weight: bold;")
+                else:
+                    status_text = f"桌面环境状态: {desktop_name} 未安装"
+                    self.main_window.desktop_status_label.setStyleSheet("color: #d32f2f; font-weight: bold;")
+            
+            self.main_window.desktop_status_label.setText(status_text)
+            
+        except Exception as e:
+            log_error(e, "更新桌面状态")
+
+    def show_desktop_config_dialog(self):
+        """显示桌面环境配置对话框"""
+        try:
+            from ui.desktop_config_dialog import DesktopConfigDialog
+            
+            # 创建配置对话框
+            dialog = DesktopConfigDialog(parent=self.main_window, config_manager=self.config_manager)
+            
+            # 显示对话框
+            if dialog.exec_() == DesktopConfigDialog.Accepted:
+                # 配置已保存，更新UI显示
+                self._update_desktop_status()
+                self.main_window.log_message("桌面环境配置已更新")
+            
+        except Exception as e:
+            log_error(e, "显示桌面配置对话框")
+            QMessageBox.warning(self.main_window, "错误", f"显示桌面配置对话框失败: {str(e)}")
+
+    def _open_url(self, url: str):
+        """打开URL"""
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception as e:
+            log_error(e, "打开URL")
+            QMessageBox.warning(self.main_window, "错误", f"无法打开链接: {str(e)}")

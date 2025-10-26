@@ -218,6 +218,14 @@ class PackageManager:
             success_count = 0
             error_messages = []
 
+            # 处理桌面环境集成
+            desktop_result = self._integrate_desktop_environment(mount_dir)
+            if desktop_result[0]:
+                success_count += 1
+                logger.info(f"桌面环境集成成功: {desktop_result[1]}")
+            else:
+                error_messages.append(f"桌面环境集成失败: {desktop_result[1]}")
+
             # 复制额外文件
             for file_info in self.config.get("customization.files", []):
                 try:
@@ -256,7 +264,7 @@ class PackageManager:
                     error_msg = f"复制脚本失败 {script_info.get('path', '')}: {str(e)}"
                     error_messages.append(error_msg)
 
-            total_items = len(self.config.get("customization.files", [])) + len(self.config.get("customization.scripts", []))
+            total_items = len(self.config.get("customization.files", [])) + len(self.config.get("customization.scripts", [])) + 1  # +1 for desktop
             if success_count > 0:
                 message = f"成功添加 {success_count}/{total_items} 个文件和脚本"
                 if error_messages:
@@ -267,6 +275,45 @@ class PackageManager:
 
         except Exception as e:
             error_msg = f"添加文件和脚本时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    def _integrate_desktop_environment(self, mount_dir: Path) -> Tuple[bool, str]:
+        """集成桌面环境到WinPE
+
+        Args:
+            mount_dir: WinPE挂载目录
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        try:
+            from core.desktop_manager import DesktopManager
+            desktop_manager = DesktopManager(self.config)
+            
+            # 获取桌面配置
+            desktop_config = desktop_manager.get_current_desktop_config()
+            desktop_type = desktop_config["type"]
+            
+            if desktop_type == "disabled":
+                return True, "未启用桌面环境"
+            
+            # 检查是否需要自动下载
+            auto_download = self.config.get("winpe.desktop_auto_download", False)
+            if auto_download:
+                logger.info(f"开始设置桌面环境: {desktop_config['name']}")
+                setup_result = desktop_manager.setup_desktop_environment(desktop_type, auto_download)
+                if not setup_result[0]:
+                    return False, f"桌面环境设置失败: {setup_result[1]}"
+            
+            # 准备桌面环境到WinPE
+            logger.info(f"准备桌面环境到WinPE: {desktop_config['name']}")
+            prepare_result = desktop_manager.prepare_desktop_for_winpe(desktop_type, mount_dir)
+            
+            return prepare_result
+            
+        except Exception as e:
+            error_msg = f"集成桌面环境失败: {str(e)}"
             logger.error(error_msg)
             return False, error_msg
 

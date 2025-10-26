@@ -81,13 +81,40 @@ class SystemLogHandler(logging.Handler):
                 message += f"\n异常信息: {self.formatException(record.exc_info)}"
             
             # 写入事件日志
-            win32evtlogutil.ReportEvent(
-                self.app_name,
-                event_type,
-                0,  # 事件类别
-                0,  # 事件ID
-                message=message
-            )
+            # 使用正确的方法名
+            if hasattr(win32evtlogutil, 'ReportEvent'):
+                win32evtlogutil.ReportEvent(
+                    self.app_name,
+                    event_type,
+                    0,  # 事件类别
+                    0,  # 事件ID
+                    [message]  # 消息必须是字符串列表
+                )
+            elif hasattr(win32evtlogutil, 'ReportEventA'):
+                win32evtlogutil.ReportEventA(
+                    self.app_name,
+                    event_type,
+                    0,  # 事件类别
+                    0,  # 事件ID
+                    [message]  # 消息必须是字符串列表
+                )
+            else:
+                # 如果两种方法都不存在，使用直接写入事件日志的方式
+                handle = win32evtlog.OpenEventLog(None, self.log_type)
+                try:
+                    win32evtlog.ReportEvent(
+                        handle,
+                        event_type,
+                        0,  # 事件类别
+                        0,  # 事件ID
+                        None,  # 用户SID
+                        1,  # 字符串数量
+                        0,  # 原始数据大小
+                        [message],  # 字符串数组
+                        None  # 原始数据
+                    )
+                finally:
+                    win32evtlog.CloseEventLog(handle)
             
         except Exception as e:
             # 如果系统日志写入失败，回退到文件日志

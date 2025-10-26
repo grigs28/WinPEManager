@@ -320,16 +320,24 @@ class LanguageConfig:
                     logger.warning(f"⚠️ 暂存空间设置失败: {stderr}")
 
                 # 设置目标路径
-                logger.info(f"设置WinPE目标路径: {winpe_config['target_path']}")
-                success, stdout, stderr = self.adk.run_dism_command([
-                    '/Image:' + str(mount_dir),
-                    f'/Set-TargetPath:{winpe_config["target_path"]}'
-                ])
-
-                if success:
-                    logger.info(f"✅ 目标路径设置成功: {winpe_config['target_path']}")
+                target_path = winpe_config['target_path']
+                logger.info(f"设置WinPE目标路径: {target_path}")
+                
+                # 验证目标路径格式
+                if not target_path or not target_path.endswith(':'):
+                    logger.warning(f"⚠️ 目标路径格式无效: {target_path}，跳过此设置")
                 else:
-                    logger.warning(f"⚠️ 目标路径设置失败: {stderr}")
+                    success, stdout, stderr = self.adk.run_dism_command([
+                        '/Image:' + str(mount_dir),
+                        f'/Set-TargetPath:{target_path}'
+                    ])
+
+                    if success:
+                        logger.info(f"✅ 目标路径设置成功: {target_path}")
+                    else:
+                        logger.warning(f"⚠️ 目标路径设置失败: {stderr}")
+                        # 如果设置失败，这不是致命错误，继续执行其他设置
+                        logger.info("ℹ️ 目标路径设置失败不会影响WinPE的正常功能")
 
             # 配置WinPE启动参数
             self._configure_winpe_boot_settings(current_build_path, winpe_config)

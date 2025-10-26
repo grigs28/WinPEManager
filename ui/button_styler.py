@@ -18,7 +18,7 @@ def apply_3d_button_style(button):
     button.setMinimumWidth(85)
 
     # 设置字体
-    font = QFont("Microsoft YaHei", 9, QFont.Bold)
+    font = QFont("Microsoft YaHei", 12, QFont.Bold)
     button.setFont(font)
 
     # 设置柔和的立体3D样式表

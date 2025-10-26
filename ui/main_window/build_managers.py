@@ -573,6 +573,288 @@ class BuildManagers:
             from utils.logger import logger
             logger.error(f"显示错误对话框失败: {e}")
 
+    def make_iso_direct(self):
+        """直接制作ISO"""
+        try:
+            # 开始日志输出
+            self.main_window.log_message("=== 开始直接制作ISO ===")
+            
+            # 检查管理员权限
+            self.main_window.log_message("🔍 检查管理员权限...")
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                self.main_window.log_message("❌ 缺少管理员权限，请求用户确认...")
+                reply = QMessageBox.question(
+                    self.main_window, "需要管理员权限",
+                    "ISO制作需要管理员权限。\n\n是否以管理员身份重新启动程序？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    self.main_window.log_message("✅ 用户同意以管理员身份重新启动...")
+                    # 以管理员权限重新启动程序
+                    try:
+                        import sys
+
+                        # 获取当前程序路径
+                        if hasattr(sys, 'frozen'):
+                            # 打包后的exe
+                            current_exe = sys.executable
+                        else:
+                            # Python脚本
+                            current_exe = str(Path(__file__).parent.parent.parent / "main.py")
+
+                        self.main_window.log_message(f"🚀 以管理员身份重新启动: {current_exe}")
+                        
+                        # 请求管理员权限重新启动
+                        ctypes.windll.shell32.ShellExecuteW(
+                            None,
+                            "runas",  # 以管理员身份运行
+                            current_exe,
+                            " ".join(sys.argv[1:]),  # 传递原有参数
+                            None,
+                            1
+                        )
+
+                        # 退出当前程序
+                        from PyQt5.QtWidgets import QApplication
+                        QApplication.quit()
+                        sys.exit(0)
+
+                    except Exception as e:
+                        self.main_window.log_message(f"❌ 重新启动失败: {str(e)}")
+                        QMessageBox.critical(
+                            self.main_window, "重新启动失败",
+                            f"无法以管理员身份重新启动程序。\n\n请手动右键点击程序选择'以管理员身份运行'。\n\n错误详情: {str(e)}"
+                        )
+                        return
+                else:
+                    self.main_window.log_message("❌ 用户取消管理员权限请求")
+                    return
+            else:
+                self.main_window.log_message("✅ 管理员权限检查通过")
+
+            # 获取构建方式
+            self.main_window.log_message("📋 读取构建配置...")
+            build_method_text = self.config_manager.get("winpe.build_method", "copype")
+            build_method = "copype" if build_method_text == "copype" else "dism"
+            self.main_window.log_message(f"🔧 构建方式: {build_method.upper()}")
+
+            # 获取工作空间和ISO路径
+            self.main_window.log_message("📁 检查路径配置...")
+            workspace = Path(self.config_manager.get("output.workspace", ""))
+            if not workspace.exists():
+                workspace = Path.cwd() / "workspace" / "WinPE_Build"
+                self.main_window.log_message(f"📂 使用默认工作空间: {workspace}")
+            else:
+                self.main_window.log_message(f"📂 工作空间: {workspace}")
+
+            iso_path = self.config_manager.get("output.iso_path", "")
+            if not iso_path:
+                self.main_window.log_message("❌ ISO输出路径未配置")
+                QMessageBox.warning(
+                    self.main_window, "配置错误",
+                    "请先设置ISO输出路径。"
+                )
+                return
+            else:
+                self.main_window.log_message(f"💾 ISO输出路径: {iso_path}")
+
+            # 检查用户是否选定了构建目录
+            self.main_window.log_message("🔍 检查用户选定的构建目录...")
+            current_item = self.main_window.builds_list.currentItem()
+            
+            if not current_item:
+                self.main_window.log_message("❌ 用户未选定构建目录")
+                QMessageBox.warning(
+                    self.main_window, "未选定构建目录",
+                    "请先在已构建目录列表中选择一个构建目录，然后再制作ISO。\n\n"
+                    "如果列表为空，请先构建WinPE。"
+                )
+                return
+            
+            selected_build = current_item.data(Qt.UserRole)
+            if not selected_build or not Path(selected_build).exists():
+                self.main_window.log_message("❌ 选定的构建目录无效")
+                QMessageBox.warning(
+                    self.main_window, "无效的构建目录",
+                    "选定的构建目录无效或不存在。\n\n请重新选择一个有效的构建目录。"
+                )
+                return
+            
+            selected_build_path = Path(selected_build)
+            self.main_window.log_message(f"✅ 用户选定的构建目录: {selected_build_path.name}")
+
+            # 检查构建目录中的WIM文件
+            self.main_window.log_message("🔍 检查WIM文件...")
+            if build_method == "copype":
+                wim_path = selected_build_path / "media" / "sources" / "boot.wim"
+                self.main_window.log_message(f"📋 copype模式，检查: {wim_path}")
+            else:
+                wim_path = selected_build_path / "winpe.wim"
+                self.main_window.log_message(f"📋 DISM模式，检查: {wim_path}")
+
+            if not wim_path.exists():
+                self.main_window.log_message(f"❌ WIM文件不存在: {wim_path}")
+                QMessageBox.warning(
+                    self.main_window, "WIM文件不存在",
+                    f"在构建目录中未找到WIM文件：\n{wim_path}\n\n请确保构建已完成且成功。"
+                )
+                return
+            else:
+                wim_size = wim_path.stat().st_size / (1024 * 1024)
+                self.main_window.log_message(f"✅ WIM文件存在，大小: {wim_size:.1f} MB")
+
+            # 确认制作ISO
+            self.main_window.log_message("🤔 请求用户确认制作ISO...")
+            reply = QMessageBox.question(
+                self.main_window, "确认制作ISO",
+                f"即将制作ISO文件：\n\n"
+                f"构建目录: {selected_build_path}\n"
+                f"输出路径: {iso_path}\n"
+                f"构建方式: {build_method.upper()}\n\n"
+                f"确定要继续吗？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                self.main_window.log_message("❌ 用户取消ISO制作")
+                return
+            else:
+                self.main_window.log_message("✅ 用户确认开始制作ISO")
+
+            # 显示进度
+            self.main_window.progress_bar.setVisible(True)
+            self.main_window.progress_bar.setValue(0)
+            self.main_window.status_label.setText("正在制作ISO...")
+
+            # 制作ISO
+            self.main_window.log_message("🚀 开始制作ISO...")
+            success, message = self._create_iso_from_build(selected_build_path, iso_path, build_method)
+
+            # 恢复UI状态
+            self.main_window.progress_bar.setVisible(False)
+            self.main_window.status_label.setText("ISO制作完成" if success else "ISO制作失败")
+
+            # 显示结果
+            if success:
+                self.main_window.log_message("✅ ISO制作成功")
+                self.main_window.log_message(f"📄 结果: {message}")
+                QMessageBox.information(self.main_window, "ISO制作完成", message)
+                # 刷新构建目录列表
+                self.refresh_builds_list()
+            else:
+                self.main_window.log_message("❌ ISO制作失败")
+                self.main_window.log_message(f"❌ 错误: {message}")
+                QMessageBox.critical(self.main_window, "ISO制作失败", message)
+
+            self.main_window.log_message("=== ISO制作流程结束 ===")
+
+        except Exception as e:
+            self.main_window.log_message(f"❌ 制作ISO过程中发生异常: {str(e)}")
+            log_error(e, "制作ISO")
+            QMessageBox.critical(self.main_window, "制作ISO错误", f"制作ISO时发生错误: {str(e)}")
+
+    def _create_iso_from_build(self, build_dir: Path, iso_path: str, build_method: str) -> tuple[bool, str]:
+        """从构建目录制作ISO"""
+        try:
+            from core.winpe.iso_creator import ISOCreator
+            from core.winpe.mount_manager import MountManager
+
+            # 创建ISO创建器
+            self.main_window.log_message("🔧 初始化ISO创建器...")
+            iso_creator = ISOCreator(self.config_manager)
+            mount_manager = MountManager(self.config_manager)
+
+            if build_method == "copype":
+                # copype模式：直接从media目录制作ISO
+                self.main_window.log_message("📋 使用copype模式制作ISO...")
+                media_dir = build_dir / "media"
+                if not media_dir.exists():
+                    self.main_window.log_message(f"❌ media目录不存在：{media_dir}")
+                    return False, f"media目录不存在：{media_dir}"
+
+                self.main_window.log_message(f"📂 media目录: {media_dir}")
+                self.main_window.on_build_log("开始制作ISO（copype模式）...")
+                self.main_window.on_build_progress("正在制作ISO...", 30)
+
+                self.main_window.log_message("🚀 调用ISO创建器...")
+                success, message = iso_creator.create_iso_from_media(media_dir, iso_path)
+                self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
+
+            else:
+                # 传统DISM模式：需要先挂载WIM文件，然后制作ISO
+                self.main_window.log_message("📋 使用DISM模式制作ISO...")
+                wim_path = build_dir / "winpe.wim"
+                if not wim_path.exists():
+                    self.main_window.log_message(f"❌ WIM文件不存在：{wim_path}")
+                    return False, f"WIM文件不存在：{wim_path}"
+
+                self.main_window.log_message(f"📄 WIM文件: {wim_path}")
+                wim_size = wim_path.stat().st_size / (1024 * 1024)
+                self.main_window.log_message(f"📊 WIM文件大小: {wim_size:.1f} MB")
+
+                self.main_window.on_build_log("开始制作ISO（DISM模式）...")
+                self.main_window.on_build_progress("正在挂载WIM文件...", 30)
+
+                # 创建临时挂载目录
+                mount_dir = build_dir / "mount"
+                self.main_window.log_message(f"📂 创建挂载目录: {mount_dir}")
+                mount_dir.mkdir(exist_ok=True)
+
+                # 挂载WIM文件
+                self.main_window.log_message("🔌 开始挂载WIM文件...")
+                success, message = mount_manager.mount_wim(wim_path, str(mount_dir))
+                self.main_window.log_message(f"📊 挂载结果: success={success}, message={message}")
+                
+                if not success:
+                    self.main_window.log_message(f"❌ 挂载WIM文件失败：{message}")
+                    return False, f"挂载WIM文件失败：{message}"
+
+                try:
+                    self.main_window.log_message("✅ WIM文件挂载成功")
+                    self.main_window.on_build_progress("正在制作ISO...", 60)
+
+                    # 从挂载目录制作ISO
+                    self.main_window.log_message("🚀 从挂载目录制作ISO...")
+                    success, message = iso_creator.create_iso_from_mounted(str(mount_dir), iso_path)
+                    self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
+
+                finally:
+                    # 卸载WIM文件
+                    self.main_window.log_message("🔌 开始卸载WIM文件...")
+                    self.main_window.on_build_progress("正在清理...", 90)
+                    unmount_success, unmount_message = mount_manager.unmount_wim(str(mount_dir), commit=False)
+                    self.main_window.log_message(f"📊 卸载结果: success={unmount_success}, message={unmount_message}")
+                    
+                    if not unmount_success:
+                        self.main_window.log_message(f"⚠️ 卸载WIM文件失败：{unmount_message}")
+                        self.main_window.on_build_log(f"警告：卸载WIM文件失败：{unmount_message}")
+                    else:
+                        self.main_window.log_message("✅ WIM文件卸载成功")
+
+            if success:
+                self.main_window.on_build_progress("ISO制作完成", 100)
+                self.main_window.log_message("✅ ISO制作流程完成")
+                
+                # 检查ISO文件
+                iso_file = Path(iso_path)
+                if iso_file.exists():
+                    size_mb = iso_file.stat().st_size / (1024 * 1024)
+                    self.main_window.log_message(f"✅ ISO文件验证成功: {iso_path}")
+                    self.main_window.log_message(f"📊 ISO文件大小: {size_mb:.1f} MB")
+                    return True, f"ISO文件制作成功：\n{iso_path}\n文件大小：{size_mb:.1f} MB"
+                else:
+                    self.main_window.log_message("❌ ISO文件制作完成但文件不存在")
+                    return False, "ISO文件制作完成但文件不存在"
+            else:
+                self.main_window.log_message(f"❌ ISO制作失败：{message}")
+                return False, f"ISO制作失败：{message}"
+
+        except Exception as e:
+            self.main_window.log_message(f"❌ 制作ISO过程中发生异常：{str(e)}")
+            return False, f"制作ISO过程中发生错误：{str(e)}"
+
     def on_build_finished(self, success: bool, message: str):
         """构建完成"""
         # 恢复UI状态

@@ -2,12 +2,16 @@
   "winpe": {
     "architecture": "amd64",
     "version": "11",
-    "language": "zh-TW",
+    "language": "zh-CN",
     "base_winpe": "winpe.wim",
     "build_method": "copype",
-    "enable_winpe_settings": false,
+    "enable_winpe_settings": true,
     "scratch_space_mb": 128,
-    "target_path": "X:"
+    "target_path": "X:",
+    "desktop_type": "winxshell",
+    "desktop_program_path": "D:\\APP\\WinPEManager\\Desktop\\Cairo Shell\\CairoDesktop.exe",
+    "desktop_directory_path": "D:\\APP\\WinPEManager\\Desktop\\Cairo Shell",
+    "desktop_auto_download": true
   },
   "adk": {
     "install_path": "",

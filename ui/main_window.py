@@ -54,6 +54,9 @@ class MainWindow(QMainWindow):
 
         # 启动时立即检查ADK状态
         self.check_adk_status()
+        
+        # 启动时自动检测桌面环境
+        self.event_handlers.auto_detect_desktop_on_startup()
 
     def set_window_icon(self):
         """设置窗口图标（随机选择PNG文件）"""
@@ -149,6 +152,18 @@ class MainWindow(QMainWindow):
         """保存基本配置"""
         self.event_handlers.save_basic_config()
 
+    def on_desktop_type_changed(self):
+        """桌面类型选择变化事件"""
+        self.event_handlers.on_desktop_type_changed()
+
+    def browse_desktop_program(self):
+        """浏览桌面程序路径"""
+        self.event_handlers.browse_desktop_program()
+
+    def browse_desktop_directory(self):
+        """浏览桌面目录路径"""
+        self.event_handlers.browse_desktop_directory()
+
     def save_customization_config(self):
         """保存定制配置"""
         self.event_handlers.save_customization_config()
@@ -217,6 +232,10 @@ class MainWindow(QMainWindow):
     def stop_build(self):
         """停止构建"""
         self.build_managers.stop_build()
+
+    def make_iso_direct(self):
+        """直接制作ISO"""
+        self.build_managers.make_iso_direct()
 
     def refresh_builds_list(self):
         """刷新已构建目录列表"""
@@ -303,6 +322,10 @@ class MainWindow(QMainWindow):
     def refresh_files(self):
         """刷新文件列表"""
         self.helpers.refresh_files()
+
+    def show_desktop_config_dialog(self):
+        """显示桌面环境配置对话框"""
+        self.event_handlers.show_desktop_config_dialog()
 
     def closeEvent(self, event):
         """窗口关闭事件"""

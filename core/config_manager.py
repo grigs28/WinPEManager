@@ -29,9 +29,17 @@ class ConfigManager:
         return {
             "winpe": {
                 "architecture": "amd64",  # x86, amd64, arm
-                "version": "10",  # WinPE版本
-                "language": "zh-cn",  # 语言
-                "base_winpe": "winpe.wim"  # 基础WinPE镜像
+                "version": "11",  # WinPE版本
+                "language": "zh-CN",  # 语言
+                "base_winpe": "winpe.wim",  # 基础WinPE镜像
+                "build_method": "copype",  # 构建方法
+                "enable_winpe_settings": True,  # 启用WinPE专用设置
+                "scratch_space_mb": 128,  # 暂存空间(MB)
+                "target_path": "X:",  # 目标路径
+                "desktop_type": "cairo",  # 桌面环境类型
+                "desktop_program_path": "",  # 桌面程序路径
+                "desktop_directory_path": "",  # 桌面目录路径
+                "desktop_auto_download": True  # 自动下载桌面环境
             },
             "adk": {
                 "install_path": "",  # ADK安装路径
