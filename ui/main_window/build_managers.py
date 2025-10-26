@@ -767,19 +767,22 @@ class BuildManagers:
             mount_manager = MountManager(self.config_manager, self.adk_manager)
 
             if build_method == "copype":
-                # copype模式：直接从media目录制作ISO
+                # copype模式：直接从构建目录制作ISO（构建目录已包含media子目录）
                 self.main_window.log_message("📋 使用copype模式制作ISO...")
+                # 检查media目录是否存在
                 media_dir = build_dir / "media"
                 if not media_dir.exists():
                     self.main_window.log_message(f"❌ media目录不存在：{media_dir}")
                     return False, f"media目录不存在：{media_dir}"
 
-                self.main_window.log_message(f"📂 media目录: {media_dir}")
+                self.main_window.log_message(f"📂 构建目录: {build_dir}")
+                self.main_window.log_message(f"📂 media子目录: {media_dir}")
                 self.main_window.on_build_log("开始制作ISO（copype模式）...")
                 self.main_window.on_build_progress("正在制作ISO...", 30)
 
                 self.main_window.log_message("🚀 调用ISO创建器...")
-                success, message = iso_creator.create_bootable_iso(media_dir, iso_path)
+                # 传递构建目录，ISO创建器会自动查找其中的media子目录
+                success, message = iso_creator.create_bootable_iso(build_dir, iso_path)
                 self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
 
             else:

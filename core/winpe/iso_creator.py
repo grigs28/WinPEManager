@@ -306,6 +306,11 @@ class ISOCreator:
                 if ENHANCED_LOGGING_AVAILABLE:
                     log_build_step("检查源目录", f"缺少media目录: {media_path}", "error")
                 return False, f"源目录中缺少media目录: {media_path}"
+            
+            # MakeWinPEMedia期望的源目录就是包含media的目录
+            # 不需要再添加media路径，因为current_build_path已经包含media目录
+            logger.info(f"MakeWinPEMedia源目录: {current_build_path}")
+            logger.info(f"Media子目录: {media_path}")
 
             # 检查boot.wim文件
             boot_wim = media_path / "sources" / "boot.wim"
