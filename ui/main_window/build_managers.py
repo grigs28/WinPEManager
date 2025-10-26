@@ -764,7 +764,7 @@ class BuildManagers:
             # 创建ISO创建器
             self.main_window.log_message("🔧 初始化ISO创建器...")
             iso_creator = ISOCreator(self.config_manager, self.adk_manager)
-            mount_manager = MountManager(self.config_manager)
+            mount_manager = MountManager(self.config_manager, self.adk_manager)
 
             if build_method == "copype":
                 # copype模式：直接从media目录制作ISO

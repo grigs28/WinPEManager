@@ -232,11 +232,11 @@ exit
             language_code = self.config.get("winpe.language", "zh-CN")
             language_name = self._get_language_name(language_code)
             
-            # 创建优化的WinXShell启动脚本
+            # 创建优化的WinXShell启动脚本（完全去掉cmd.exe）
             winxshell_startup = mount_dir / "Windows" / "System32" / "WinXShell.bat"
             winxshell_content = f"""@echo off
 title WinXShell Startup
-echo 正在启动WinXShell...
+echo 正在启动WinXShell ({language_name})...
 
 rem 设置环境变量
 set USERPROFILE=X:\\Users\\Default
@@ -244,6 +244,11 @@ set APPDATA=X:\\Users\\Default\\AppData\\Roaming
 set LOCALAPPDATA=X:\\Users\\Default\\AppData\\Local
 set TEMP=X:\\Temp
 set TMP=X:\\Temp
+
+rem 设置语言环境
+set LANG={language_code}
+set LANGUAGE={language_code}
+set LC_ALL={language_code}
 
 rem 创建临时目录
 if not exist "X:\\Temp" mkdir "X:\\Temp"
@@ -255,9 +260,10 @@ rem 检查WinXShell是否存在
 if exist "WinXShell_x64.exe" (
     echo 启动WinXShell ({language_name})...
     echo 使用配置: X:\\WinXShell\\WinXShell.ini
+    echo 语言设置: {language_code}
     
-    rem 启动WinXShell（WinPE模式 + 桌面 + 静默）
-    start "WinXShell" /MIN "WinXShell_x64.exe" -winpe -desktop -silent -log="X:\\WinXShell\\debug.log"
+    rem 启动WinXShell（WinPE模式 + 桌面 + 静默 + 无控制台）
+    start "" /MIN "WinXShell_x64.exe" -winpe -desktop -silent -log="X:\\WinXShell\\debug.log" -jcfg="X:\\WinXShell\\WinXShell.ini"
     
     rem 等待WinXShell启动
     timeout /t 3 /nobreak >nul
@@ -265,7 +271,8 @@ if exist "WinXShell_x64.exe" (
     rem 检查WinXShell是否正在运行
     tasklist | findstr /i "winxshell.exe" >nul
     if %ERRORLEVEL% EQU 0 (
-        echo WinXShell启动成功，隐藏命令提示符
+        echo WinXShell启动成功
+        echo 语言环境: {language_name}
         exit
     ) else (
         echo WinXShell启动失败，检查日志...
@@ -273,18 +280,17 @@ if exist "WinXShell_x64.exe" (
             echo 调试日志内容:
             type "X:\\WinXShell\\debug.log"
         )
-        goto :show_cmd
+        rem 不显示cmd.exe，直接退出
+        exit
     )
 ) else (
     echo WinXShell未找到
     echo 预期位置: X:\\WinXShell\\WinXShell_x64.exe
-    goto :show_cmd
+    rem 不显示cmd.exe，直接退出
+    exit
 )
 
-:show_cmd
-rem 如果WinXShell启动失败，显示命令提示符
-echo 启动命令提示符作为备用...
-start /MIN cmd.exe
+rem 完全退出，不显示任何命令提示符
 exit
 """
             winxshell_startup.write_text(winxshell_content)
