@@ -763,7 +763,7 @@ class BuildManagers:
 
             # 创建ISO创建器
             self.main_window.log_message("🔧 初始化ISO创建器...")
-            iso_creator = ISOCreator(self.config_manager)
+            iso_creator = ISOCreator(self.config_manager, self.adk_manager)
             mount_manager = MountManager(self.config_manager)
 
             if build_method == "copype":
@@ -779,7 +779,7 @@ class BuildManagers:
                 self.main_window.on_build_progress("正在制作ISO...", 30)
 
                 self.main_window.log_message("🚀 调用ISO创建器...")
-                success, message = iso_creator.create_iso_from_media(media_dir, iso_path)
+                success, message = iso_creator.create_bootable_iso(media_dir, iso_path)
                 self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
 
             else:
@@ -817,7 +817,7 @@ class BuildManagers:
 
                     # 从挂载目录制作ISO
                     self.main_window.log_message("🚀 从挂载目录制作ISO...")
-                    success, message = iso_creator.create_iso_from_mounted(str(mount_dir), iso_path)
+                    success, message = iso_creator.create_bootable_iso(Path(mount_dir), iso_path)
                     self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
 
                 finally:

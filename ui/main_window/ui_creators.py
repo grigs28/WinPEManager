@@ -149,7 +149,7 @@ class UICreators:
         desktop_group = QGroupBox("WinPE 桌面配置")
         desktop_layout = QVBoxLayout(desktop_group)
 
-        # 桌面类型选择
+        # 桌面类型选择 - 占满整行，右侧添加下载链接和配置按钮
         desktop_type_layout = QHBoxLayout()
         desktop_type_layout.addWidget(QLabel("桌面环境:"))
         self.main_window.desktop_type_combo = QComboBox()
@@ -173,6 +173,36 @@ class UICreators:
         # 连接选择变化信号
         self.main_window.desktop_type_combo.currentTextChanged.connect(self.main_window.on_desktop_type_changed)
         desktop_type_layout.addWidget(self.main_window.desktop_type_combo)
+        
+        # 设置下拉框占满剩余空间
+        desktop_type_layout.setStretchFactor(self.main_window.desktop_type_combo, 1)
+        
+        # 下载链接标签
+        desktop_type_layout.addWidget(QLabel("下载:"))
+        
+        # Cairo Desktop下载链接
+        self.main_window.cairo_download_link = QLabel('<a href="https://github.com/cairoshell/cairoshell/releases/download/v0.4.407/CairoSetup_64bit.exe" style="color: #2196F3; text-decoration: underline;">Cairo</a>')
+        self.main_window.cairo_download_link.setOpenExternalLinks(True)
+        self.main_window.cairo_download_link.setToolTip("点击访问 Cairo Desktop 下载页面")
+        desktop_type_layout.addWidget(self.main_window.cairo_download_link)
+        
+        desktop_type_layout.addWidget(QLabel(" | "))
+        
+        # WinXShell下载链接
+        self.main_window.winxshell_download_link = QLabel('<a href="https://www.lanzoux.com/b011xhbsh" style="color: #2196F3; text-decoration: underline;">WinXShell</a>')
+        self.main_window.winxshell_download_link.setOpenExternalLinks(True)
+        self.main_window.winxshell_download_link.setToolTip("点击访问 WinXShell 蓝奏云下载页面\n提取密码: shell")
+        desktop_type_layout.addWidget(self.main_window.winxshell_download_link)
+        
+        desktop_type_layout.addWidget(QLabel(" | "))
+        
+        # 配置按钮 - 与下方浏览按钮对齐
+        desktop_config_btn = QPushButton("配置")
+        desktop_config_btn.clicked.connect(self.main_window.show_desktop_config_dialog)
+        desktop_config_btn.setMaximumWidth(60)
+        apply_3d_button_style(desktop_config_btn)
+        desktop_type_layout.addWidget(desktop_config_btn)
+        
         desktop_layout.addLayout(desktop_type_layout)
 
         # 程序路径选择
@@ -213,38 +243,6 @@ class UICreators:
         self.main_window.desktop_status_label = QLabel("桌面环境状态: 未配置")
         self.main_window.desktop_status_label.setStyleSheet("color: #666; font-style: italic;")
         desktop_layout.addWidget(self.main_window.desktop_status_label)
-
-        # 桌面环境下载链接行 - 放在选择框后面
-        desktop_links_layout = QHBoxLayout()
-        
-        # 下载链接标签
-        desktop_links_layout.addWidget(QLabel("下载地址:"))
-        
-        # Cairo Desktop下载链接
-        self.main_window.cairo_download_link = QLabel('<a href="https://github.com/cairoshell/cairoshell/releases/download/v0.4.407/CairoSetup_64bit.exe" style="color: #2196F3; text-decoration: underline;">Cairo Desktop</a>')
-        self.main_window.cairo_download_link.setOpenExternalLinks(True)
-        self.main_window.cairo_download_link.setToolTip("点击访问 Cairo Desktop 下载页面")
-        desktop_links_layout.addWidget(self.main_window.cairo_download_link)
-        
-        desktop_links_layout.addWidget(QLabel(" | "))
-        
-        # WinXShell下载链接
-        self.main_window.winxshell_download_link = QLabel('<a href="https://www.lanzoux.com/b011xhbsh" style="color: #2196F3; text-decoration: underline;">WinXShell (密码: shell)</a>')
-        self.main_window.winxshell_download_link.setOpenExternalLinks(True)
-        self.main_window.winxshell_download_link.setToolTip("点击访问 WinXShell 蓝奏云下载页面\n提取密码: shell")
-        desktop_links_layout.addWidget(self.main_window.winxshell_download_link)
-        
-        desktop_links_layout.addWidget(QLabel(" | "))
-        
-        # 配置按钮
-        desktop_config_btn = QPushButton("配置")
-        desktop_config_btn.clicked.connect(self.main_window.show_desktop_config_dialog)
-        desktop_config_btn.setMaximumWidth(60)
-        apply_3d_button_style(desktop_config_btn)
-        desktop_links_layout.addWidget(desktop_config_btn)
-        
-        desktop_links_layout.addStretch()
-        desktop_layout.addLayout(desktop_links_layout)
 
         layout.addWidget(desktop_group)
 
