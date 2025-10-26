@@ -21,6 +21,7 @@ from core.winpe import (
     LanguageConfig,
     BootManager
 )
+from core.winpe.boot_config import BootConfig
 
 # 导入增强的日志功能
 try:
@@ -56,6 +57,7 @@ class WinPEBuilder:
         self.iso_creator = ISOCreator(config_manager, adk_manager, parent_callback)
         self.language_config = LanguageConfig(config_manager, adk_manager, parent_callback)
         self.boot_manager = BootManager(config_manager, adk_manager, parent_callback)
+        self.boot_config = BootConfig(config_manager, adk_manager, parent_callback)
 
     def initialize_workspace(self, use_copype: bool = None) -> Tuple[bool, str]:
         """初始化工作空间
@@ -419,6 +421,20 @@ class WinPEBuilder:
             else:
                 if ENHANCED_LOGGING_AVAILABLE:
                     log_build_step("添加文件脚本", "文件和脚本添加成功")
+
+            # 7.5. 配置启动设置（隐藏cmd.exe窗口）
+            desktop_type = self.config.get("winpe.desktop_type", "disabled")
+            if ENHANCED_LOGGING_AVAILABLE:
+                log_build_step("启动配置", f"配置WinPE启动设置，桌面类型: {desktop_type}")
+            
+            success, message = self.boot_config.configure_winpe_startup(self.current_build_path, desktop_type)
+            if not success:
+                logger.warning(f"配置启动设置失败: {message}")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("启动配置", f"失败: {message}", "warning")
+            else:
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("启动配置", "WinPE启动配置完成，cmd.exe窗口将被隐藏")
 
             # 8. 卸载并提交更改
             if ENHANCED_LOGGING_AVAILABLE:
