@@ -601,7 +601,7 @@ class WIMManagerDialog(QDialog):
                     "name": boot_wim_path.name,
                     "type": "copype",
                     "size": boot_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status({"path": str(item)}),
+                    "mount_status": self.check_mount_status({"path": str(boot_wim_path)}),
                     "build_dir": build_dir
                 })
 
@@ -613,7 +613,7 @@ class WIMManagerDialog(QDialog):
                     "name": winpe_wim_path.name,
                     "type": "dism",
                     "size": winpe_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status({"path": str(item)}),
+                    "mount_status": self.check_mount_status({"path": str(winpe_wim_path)}),
                     "build_dir": build_dir
                 })
 
@@ -823,7 +823,8 @@ class WIMManagerDialog(QDialog):
             
             # 使用列表框中的构建目录
             build_dir = wim_file["build_dir"]
-            
+            wim_file_path = wim_file["path"]
+
             # 创建卸载线程
             self.unmount_thread = UnmountThread(self.config_manager, self.adk_manager, self.parent, build_dir, wim_file_path, commit)
             self.unmount_thread.progress_signal.connect(progress.setValue)

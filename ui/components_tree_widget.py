@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QHeaderView, QToolTip, QAbstractItemView, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon, QPixmap
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QColor, QPainter
 
 from core.winpe_packages import WinPEPackages
 
@@ -74,33 +74,57 @@ class ComponentsTreeWidget(QTreeWidget):
 
         # 获取分类和组件
         component_tree = self.winpe_packages.get_component_tree()
-        categories_desc = self.winpe_packages.get_categories_description()
 
-        # 创建分类节点
-        for category, description in categories_desc.items():
-            category_item = QTreeWidgetItem(self)
-            category_item.setText(0, f"{category}")
-            category_item.setText(2, description)
+        # 创建主分类节点（支持分层结构）
+        for main_category, sub_categories in component_tree.items():
+            main_item = QTreeWidgetItem(self)
+            main_item.setText(0, f"{main_category}")
+            main_item.setText(2, self.get_main_category_description(main_category))
 
-            # 设置分类图标和样式
-            category_item.setIcon(0, self.get_category_icon(category))
-            font = category_item.font(0)
+            # 设置主分类图标和样式
+            main_item.setIcon(0, self.get_main_category_icon(main_category))
+            font = main_item.font(0)
             font.setBold(True)
-            category_item.setFont(0, font)
+            font.setPointSize(10)
+            main_item.setFont(0, font)
 
-            # 设置背景色
-            category_item.setBackground(0, Qt.lightGray)
-            category_item.setBackground(1, Qt.lightGray)
-            category_item.setBackground(2, Qt.lightGray)
+            # 设置主分类背景色
+            main_item.setBackground(0, QColor(240, 240, 240))
+            main_item.setBackground(1, QColor(240, 240, 240))
+            main_item.setBackground(2, QColor(240, 240, 240))
 
-            self.category_items[category] = category_item
+            self.category_items[main_category] = main_item
 
-            # 添加组件到分类
-            if category in component_tree:
-                for package_name in component_tree[category]:
+            # 如果是分层结构，创建子分类
+            if isinstance(sub_categories, dict):
+                for sub_category, components in sub_categories.items():
+                    sub_item = QTreeWidgetItem(main_item)
+                    sub_item.setText(0, f"  {sub_category}")
+                    sub_item.setText(2, f"{sub_category} - {len(components)} 个组件")
+
+                    # 设置子分类样式
+                    sub_item.setIcon(0, self.get_sub_category_icon(sub_category))
+                    font = sub_item.font(0)
+                    font.setBold(False)
+                    font.setPointSize(9)
+                    sub_item.setFont(0, font)
+
+                    # 设置子分类背景色
+                    sub_item.setBackground(0, QColor(248, 248, 248))
+                    sub_item.setBackground(1, QColor(248, 248, 248))
+                    sub_item.setBackground(2, QColor(248, 248, 248))
+
+                    # 添加组件到子分类
+                    for package_name in components:
+                        component = self.winpe_packages.get_component_by_package_name(package_name)
+                        if component:
+                            self.add_component_item(sub_item, component)
+            else:
+                # 如果是扁平结构，直接添加组件
+                for package_name in sub_categories:
                     component = self.winpe_packages.get_component_by_package_name(package_name)
                     if component:
-                        self.add_component_item(category_item, component)
+                        self.add_component_item(main_item, component)
 
         # 展开所有分类
         self.expandAll()
@@ -297,3 +321,71 @@ class ComponentsTreeWidget(QTreeWidget):
             item.setBackground(0, Qt.white)
             item.setBackground(1, Qt.white)
             item.setBackground(2, Qt.white)
+
+    def get_main_category_description(self, main_category):
+        """获取主分类描述"""
+        descriptions = {
+            "🔧 Microsoft官方组件": "Microsoft官方提供的WinPE可选组件，经过官方验证和支持",
+            "📦 外部/第三方组件": "第三方开发的实用工具，常用于WinPE环境增强"
+        }
+        return descriptions.get(main_category, "组件分类")
+
+    def get_main_category_icon(self, main_category):
+        """获取主分类图标"""
+        from PyQt5.QtGui import QPainter, QColor
+
+        if "Microsoft官方组件" in main_category:
+            color = "#4CAF50"  # 绿色代表官方
+        elif "外部/第三方组件" in main_category:
+            color = "#FF9800"  # 橙色代表第三方
+        else:
+            color = "#9E9E9E"  # 灰色代表其他
+
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 绘制圆形图标
+        painter.setBrush(QColor(color))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(2, 2, 12, 12)
+
+        painter.end()
+        return QIcon(pixmap)
+
+    def get_sub_category_icon(self, sub_category):
+        """获取子分类图标"""
+        colors = {
+            "文件管理工具": "#2196F3",
+            "系统工具": "#4CAF50",
+            "网络工具": "#00BCD4",
+            "媒体工具": "#9C27B0",
+            "基础平台": "#795548",
+            "脚本与自动化": "#FF9800",
+            ".NET Framework": "#9C27B0",
+            "恢复环境": "#FF5722",
+            "网络连接": "#00BCD4",
+            "诊断工具": "#795548",
+            "安全防护": "#F44336",
+            "数据访问": "#607D8B",
+            "服务器支持": "#3F51B5",
+            "硬件支持": "#FF5722",
+            "字体支持": "#795548"
+        }
+
+        color = colors.get(sub_category, "#9E9E9E")
+        pixmap = QPixmap(12, 12)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 绘制方形图标
+        painter.setBrush(QColor(color))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(1, 1, 10, 10)
+
+        painter.end()
+        return QIcon(pixmap)

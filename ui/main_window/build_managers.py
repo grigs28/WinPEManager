@@ -421,7 +421,7 @@ class BuildManagers:
                     "name": boot_wim_path.name,
                     "type": "copype",
                     "size": boot_wim_path.stat().st_size,
-                    "mount_status": self._check_mount_status({"path": str(item)}),
+                    "mount_status": self._check_mount_status({"path": str(boot_wim_path)}),
                     "build_dir": build_dir
                 })
 
@@ -433,7 +433,7 @@ class BuildManagers:
                     "name": winpe_wim_path.name,
                     "type": "dism",
                     "size": winpe_wim_path.stat().st_size,
-                    "mount_status": self._check_mount_status({"path": str(item)}),
+                    "mount_status": self._check_mount_status({"path": str(winpe_wim_path)}),
                     "build_dir": build_dir
                 })
 

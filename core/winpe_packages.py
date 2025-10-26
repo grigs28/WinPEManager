@@ -24,6 +24,7 @@ class OptionalComponent:
     features: List[str]  # 提供的功能
     tooltip: str  # 鼠标提示
     selected: bool = False  # 是否选中
+    source: str = "official"  # 组件来源：official（官方）或 external（外部）
 
 
 class WinPEPackages:
@@ -36,7 +37,7 @@ class WinPEPackages:
         """构建组件树形结构"""
         components = {}
 
-        # 基础平台组件
+        # 基础平台组件 - Microsoft官方组件
         components["WinPE-WMI"] = OptionalComponent(
             name="Windows Management Instrumentation",
             package_name="WinPE-WMI",
@@ -45,7 +46,8 @@ class WinPEPackages:
             icon="🔧",
             dependencies=[],
             features=["系统信息查询", "硬件检测", "事件日志管理", "注册表操作"],
-            tooltip="Windows Management Instrumentation (WMI)\n提供系统管理和监控功能\n依赖项：无\n用途：系统检测、硬件管理、日志记录"
+            tooltip="Windows Management Instrumentation (WMI)\nMicrosoft官方组件\n提供系统管理和监控功能\n依赖项：无\n用途：系统检测、硬件管理、日志记录",
+            source="official"
         )
 
         components["WinPE-SecureStartup"] = OptionalComponent(
@@ -56,7 +58,8 @@ class WinPEPackages:
             icon="🔐",
             dependencies=["WinPE-WMI"],
             features=["BitLocker加密", "UEFI安全启动", "启动验证", "安全策略"],
-            tooltip="安全启动支持\n提供BitLocker和UEFI安全启动功能\n依赖项：WinPE-WMI\n用途：安全加密、启动验证、UEFI支持"
+            tooltip="安全启动支持\nMicrosoft官方组件\n提供BitLocker和UEFI安全启动功能\n依赖项：WinPE-WMI\n用途：安全加密、启动验证、UEFI支持",
+            source="official"
         )
 
         components["WinPE-PlatformID"] = OptionalComponent(
@@ -67,10 +70,11 @@ class WinPEPackages:
             icon="🏷",
             dependencies=["WinPE-WMI"],
             features=["平台识别", "版本检测", "系统信息"],
-            tooltip="平台标识符\n用于识别WinPE系统版本和平台信息\n依赖项：WinPE-WMI\n用途：系统识别、版本检测"
+            tooltip="平台标识符\nMicrosoft官方组件\n用于识别WinPE系统版本和平台信息\n依赖项：WinPE-WMI\n用途：系统识别、版本检测",
+            source="official"
         )
 
-        # 脚本和自动化组件
+        # 脚本和自动化组件 - Microsoft官方组件
         components["WinPE-Scripting"] = OptionalComponent(
             name="脚本引擎",
             package_name="WinPE-Scripting",
@@ -79,7 +83,8 @@ class WinPEPackages:
             icon="📜",
             dependencies=[],
             features=["VBScript支持", "JScript支持", "自动化脚本"],
-            tooltip="脚本引擎\n提供VBScript和JScript执行环境\n依赖项：无\n用途：自动化脚本、批处理、定制化"
+            tooltip="脚本引擎\nMicrosoft官方组件\n提供VBScript和JScript执行环境\n依赖项：无\n用途：自动化脚本、批处理、定制化",
+            source="official"
         )
 
         components["WinPE-HTA"] = OptionalComponent(
@@ -90,10 +95,11 @@ class WinPEPackages:
             icon="🌐",
             dependencies=["WinPE-Scripting"],
             features=["HTA应用", "HTML界面", "交互式应用"],
-            tooltip="HTML应用程序 (HTA)\n支持HTML应用程序的创建和运行\n依赖项：WinPE-Scripting\n用途：GUI应用、交互界面、自定义工具"
+            tooltip="HTML应用程序 (HTA)\nMicrosoft官方组件\n支持HTML应用程序的创建和运行\n依赖项：WinPE-Scripting\n用途：GUI应用、交互界面、自定义工具",
+            source="official"
         )
 
-        # PowerShell相关
+        # PowerShell相关 - Microsoft官方组件
         components["WinPE-PowerShell"] = OptionalComponent(
             name="Windows PowerShell",
             package_name="WinPE-PowerShell",
@@ -102,7 +108,8 @@ class WinPEPackages:
             icon="💻",
             dependencies=["WinPE-WMI"],
             features=["PowerShell命令", "cmdlet支持", "脚本执行"],
-            tooltip="Windows PowerShell\n提供完整的PowerShell命令行环境\n依赖项：WinPE-WMI\n用途：系统管理、自动化、脚本编程"
+            tooltip="Windows PowerShell\nMicrosoft官方组件\n提供完整的PowerShell命令行环境\n依赖项：WinPE-WMI\n用途：系统管理、自动化、脚本编程",
+            source="official"
         )
 
         components["WinPE-DismCmdlets"] = OptionalComponent(
@@ -113,10 +120,12 @@ class WinPEPackages:
             icon="⚙",
             dependencies=["WinPE-PowerShell"],
             features=["DISM cmdlet", "镜像管理", "包管理"],
-            tooltip="DISM命令行工具\n提供PowerShell中的DISM命令支持\n依赖项：WinPE-PowerShell\n用途：系统管理、镜像处理、包管理"
+            tooltip="DISM命令行工具\nMicrosoft官方组件\n提供PowerShell中的DISM命令支持\n依赖项：WinPE-PowerShell\n用途：系统管理、镜像处理、包管理",
+            source="official"
         )
 
         # .NET Framework相关
+        # .NET Framework相关 - Microsoft官方组件
         components["WinPE-NetFx"] = OptionalComponent(
             name=".NET Framework",
             package_name="WinPE-NetFx",
@@ -125,10 +134,134 @@ class WinPEPackages:
             icon="🔮",
             dependencies=[],
             features=[".NET 2.0", ".NET 3.5", "应用程序运行"],
-            tooltip=".NET Framework\n提供.NET Framework 2.0/3.5运行环境\n依赖项：无\n用途：.NET应用程序运行、框架支持"
+            tooltip=".NET Framework\nMicrosoft官方组件\n提供.NET Framework 2.0/3.5运行环境\n依赖项：无\n用途：.NET应用程序运行、框架支持",
+            source="official"
         )
 
-        # 恢复环境组件
+        # ========== 外部/第三方组件 ==========
+        # 这些组件不在Microsoft官方可选组件列表中，但常用于WinPE环境
+
+        components["ThirdParty-7Zip"] = OptionalComponent(
+            name="7-Zip压缩工具",
+            package_name="ThirdParty-7Zip",
+            description="开源压缩解压工具，支持多种格式",
+            category="文件管理工具",
+            icon="📦",
+            dependencies=[],
+            features=["压缩文件", "解压缩", "多格式支持", "命令行版本"],
+            tooltip="7-Zip压缩工具\n第三方开源组件\n提供强大的压缩解压功能\n依赖项：无\n用途：文件压缩、备份、存档管理",
+            source="external"
+        )
+
+        components["ThirdParty-NotepadPlus"] = OptionalComponent(
+            name="Notepad++编辑器",
+            package_name="ThirdParty-NotepadPlus",
+            description="功能强大的文本编辑器",
+            category="文件管理工具",
+            icon="📝",
+            dependencies=[],
+            features=["语法高亮", "多标签页", "插件支持", "多编码支持"],
+            tooltip="Notepad++编辑器\n第三方开源组件\n专业的文本和代码编辑器\n依赖项：无\n用途：编辑配置文件、查看日志、代码开发",
+            source="external"
+        )
+
+        components["ThirdParty-ProcessExplorer"] = OptionalComponent(
+            name="Process Explorer",
+            package_name="ThirdParty-ProcessExplorer",
+            description="Windows任务管理器的增强版",
+            category="系统工具",
+            icon="🔍",
+            dependencies=[],
+            features=["进程监控", "DLL查看", "句柄分析", "性能监控"],
+            tooltip="Process Explorer\nMicrosoft Sysinternals工具\n高级进程和系统资源监控工具\n依赖项：无\n用途：进程分析、系统诊断、故障排除",
+            source="external"
+        )
+
+        components["ThirdParty-TotalCommander"] = OptionalComponent(
+            name="Total Commander",
+            package_name="ThirdParty-TotalCommander",
+            description="双面板文件管理器",
+            category="文件管理工具",
+            icon="🗂️",
+            dependencies=[],
+            features=["双面板显示", "文件同步", "压缩包支持", "FTP客户端"],
+            tooltip="Total Commander\n第三方商业组件\n经典的文件管理器\n依赖项：无\n用途：文件管理、批量操作、网络传输",
+            source="external"
+        )
+
+        components["ThirdParty-ExplorerPlus"] = OptionalComponent(
+            name="Explorer++",
+            package_name="ThirdParty-ExplorerPlus",
+            description="轻量级文件管理器",
+            category="文件管理工具",
+            icon="📁",
+            dependencies=[],
+            features=["标签页浏览", "文件预览", "书签功能", "插件支持"],
+            tooltip="Explorer++\n第三方开源组件\n轻量级文件管理器\n依赖项：无\n用途：文件浏览、简单管理、系统维护",
+            source="external"
+        )
+
+        components["ThirdParty-VLC"] = OptionalComponent(
+            name="VLC媒体播放器",
+            package_name="ThirdParty-VLC",
+            description="开源媒体播放器",
+            category="媒体工具",
+            icon="🎬",
+            dependencies=[],
+            features=["视频播放", "音频播放", "字幕支持", "格式兼容"],
+            tooltip="VLC媒体播放器\n第三方开源组件\n功能全面的媒体播放器\n依赖项：无\n用途：多媒体文件播放、格式转换",
+            source="external"
+        )
+
+        components["ThirdParty-DiskGenius"] = OptionalComponent(
+            name="DiskGenius磁盘工具",
+            package_name="ThirdParty-DiskGenius",
+            description="集成磁盘分区管理和数据恢复工具",
+            category="系统工具",
+            icon="💿",
+            dependencies=[],
+            features=["分区管理", "数据恢复", "磁盘克隆", "备份还原"],
+            tooltip="DiskGenius磁盘工具\n第三方商业组件\n专业的磁盘管理和数据恢复工具\n依赖项：无\n用途：分区操作、数据恢复、系统备份",
+            source="external"
+        )
+
+        components["ThirdParty-WiFiTool"] = OptionalComponent(
+            name="WiFi连接工具",
+            package_name="ThirdParty-WiFiTool",
+            description="WiFi网络连接和配置工具",
+            category="网络工具",
+            icon="📶",
+            dependencies=[],
+            features=["WiFi扫描", "网络连接", "密码管理", "信号分析"],
+            tooltip="WiFi连接工具\n第三方组件\nWiFi网络连接和配置管理\n依赖项：无\n用途：无线网络连接、热点管理、网络诊断",
+            source="external"
+        )
+
+        components["ThirdParty-RemoteDesktop"] = OptionalComponent(
+            name="远程桌面工具",
+            package_name="ThirdParty-RemoteDesktop",
+            description="远程桌面连接和管理工具",
+            category="网络工具",
+            icon="🖥️",
+            dependencies=[],
+            features=["远程连接", "桌面控制", "文件传输", "会话管理"],
+            tooltip="远程桌面工具\n第三方组件\n远程桌面连接和管理功能\n依赖项：无\n用途：远程协助、系统管理、技术支持",
+            source="external"
+        )
+
+        components["ThirdParty-Browser"] = OptionalComponent(
+            name="轻量级浏览器",
+            package_name="ThirdParty-Browser",
+            description="适用于WinPE的网页浏览器",
+            category="网络工具",
+            icon="🌐",
+            dependencies=[],
+            features=["网页浏览", "下载管理", "书签功能", "基本设置"],
+            tooltip="轻量级浏览器\n第三方组件\n适用于WinPE环境的网页浏览器\n依赖项：无\n用途：网页访问、在线资源、文档查阅",
+            source="external"
+        )
+
+        # 恢复环境组件 - Microsoft官方组件
         components["WinPE-WinRE"] = OptionalComponent(
             name="Windows恢复环境",
             package_name="WinPE-WinRE",
@@ -137,7 +270,8 @@ class WinPEPackages:
             icon="🛠️",
             dependencies=[],
             features=["系统恢复", "故障排除", "命令行修复"],
-            tooltip="Windows恢复环境 (WinRE)\n提供系统恢复和故障排除功能\n依赖项：无\n用途：系统修复、故障诊断、恢复操作"
+            tooltip="Windows恢复环境 (WinRE)\nMicrosoft官方组件\n提供系统恢复和故障排除功能\n依赖项：无\n用途：系统修复、故障诊断、恢复操作",
+            source="official"
         )
 
         components["WinPE-Storage"] = OptionalComponent(
@@ -148,10 +282,11 @@ class WinPEPackages:
             icon="💾",
             dependencies=[],
             features=["磁盘分区", "存储管理", "DISM工具"],
-            tooltip="存储管理\n提供磁盘分区和存储管理功能\n依赖项：无\n用途：磁盘操作、分区管理、存储工具"
+            tooltip="存储管理\nMicrosoft官方组件\n提供磁盘分区和存储管理功能\n依赖项：无\n用途：磁盘操作、分区管理、存储工具",
+            source="official"
         )
 
-        # 网络和连接组件
+        # 网络和连接组件 - Microsoft官方组件
         components["WinPE-NDIS"] = OptionalComponent(
             name="网络驱动程序接口规范",
             package_name="WinPE-NDIS",
@@ -160,7 +295,8 @@ class WinPEPackages:
             icon="🌐",
             dependencies=[],
             features=["NDIS驱动", "网络连接", "无线支持"],
-            tooltip="网络驱动程序接口规范(NDIS)\n支持网络驱动程序的安装和使用\n依赖项：无\n用途：网络连接、驱动安装、网络功能"
+            tooltip="网络驱动程序接口规范(NDIS)\nMicrosoft官方组件\n支持网络驱动程序的安装和使用\n依赖项：无\n用途：网络连接、驱动安装、网络功能",
+            source="official"
         )
 
         components["WinPE-WLAN"] = OptionalComponent(
@@ -171,10 +307,11 @@ class WinPEPackages:
             icon="📶",
             dependencies=["WinPE-WMI"],
             features=["WIFI支持", "无线连接", "网络配置"],
-            tooltip="无线局域网(WLAN)\n提供无线网络连接和配置功能\n依赖项：WinPE-WMI\n用途：无线网络、WIFI连接、网络配置"
+            tooltip="无线局域网(WLAN)\nMicrosoft官方组件\n提供无线网络连接和配置功能\n依赖项：WinPE-WMI\n用途：无线网络、WIFI连接、网络配置",
+            source="official"
         )
 
-        # 诊断和工具组件
+        # 诊断和工具组件 - Microsoft官方组件
         components["WinPE-Dot3Svc"] = OptionalComponent(
             name="DirectX诊断服务",
             package_name="WinPE-Dot3Svc",
@@ -183,7 +320,8 @@ class WinPEPackages:
             icon="🎮",
             dependencies=[],
             features=["DirectX诊断", "图形支持", "硬件测试"],
-            tooltip="DirectX诊断服务\n提供DirectX图形支持和诊断功能\n依赖项：无\n用途：图形应用、硬件测试、诊断工具"
+            tooltip="DirectX诊断服务\nMicrosoft官方组件\n提供DirectX图形支持和诊断功能\n依赖项：无\n用途：图形应用、硬件测试、诊断工具",
+            source="official"
         )
 
         components["WinPE-RSAT"] = OptionalComponent(
@@ -194,7 +332,8 @@ class WinPEPackages:
             icon="🖥",
             dependencies=[],
             features=["服务器管理", "远程工具", "活动目录"],
-            tooltip="远程服务器管理工具(RSAT)\n提供服务器管理和远程连接工具\n依赖项：无\n用途：服务器管理、远程连接、活动目录"
+            tooltip="远程服务器管理工具(RSAT)\nMicrosoft官方组件\n提供服务器管理和远程连接工具\n依赖项：无\n用途：服务器管理、远程连接、活动目录",
+            source="official"
         )
 
         # 安全和防护组件
@@ -453,57 +592,85 @@ class WinPEPackages:
             Dict[str, List[str]]: 分类到组件名称的映射
         """
         categories = {
-            "基础平台": [
-                "WinPE-WMI",
-                "WinPE-SecureStartup",
-                "WinPE-PlatformID",
-                "WinPE-FMAPI"
-            ],
-            "脚本与自动化": [
-                "WinPE-Scripting",
-                "WinPE-HTA",
-                "WinPE-PowerShell",
-                "WinPE-DismCmdlets"
-            ],
-            ".NET Framework": [
-                "WinPE-NetFx"
-            ],
-            "恢复环境": [
-                "WinPE-WinRE",
-                "WinPE-Storage",
-                "WinPE-Recovery",
-                "WinPE-WinReCfg"
-            ],
-            "网络连接": [
-                "WinPE-NDIS",
-                "WinPE-WLAN",
-                "WinPE-PPPoE",
-                "WinPE-RNDIS"
-            ],
-            "诊断工具": [
-                "WinPE-Dot3Svc",
-                "WinPE-RSAT",
-                "WinPE-StorageWMI"
-            ],
-            "安全防护": [
-                "WinPE-EnhancedStorage",
-                "WinPE-SecureBoot",
-                "WinPE-SecureBootCmdlets"
-            ],
-            "数据访问": [
-                "WinPE-MDAC"
-            ],
-            "服务器支持": [
-                "WinPE-Setup-Server",
-                "WinPE-LegacySetup",
-                "WinPE-WDS-Tools"
-            ],
-                        "硬件支持": [
-                "WinPE-GamingPeripherals"
-            ],
-            "其他组件": [
-                "WinPE-FontSupport-WinRE"
-            ]
+            "🔧 Microsoft官方组件": {
+                "基础平台": [
+                    "WinPE-WMI",
+                    "WinPE-SecureStartup",
+                    "WinPE-PlatformID",
+                    "WinPE-FMAPI"
+                ],
+                "脚本与自动化": [
+                    "WinPE-Scripting",
+                    "WinPE-HTA",
+                    "WinPE-PowerShell",
+                    "WinPE-DismCmdlets"
+                ],
+                ".NET Framework": [
+                    "WinPE-NetFx"
+                ],
+                "恢复环境": [
+                    "WinPE-WinRE",
+                    "WinPE-Storage",
+                    "WinPE-Recovery",
+                    "WinPE-WinReCfg"
+                ],
+                "网络连接": [
+                    "WinPE-NDIS",
+                    "WinPE-WLAN",
+                    "WinPE-PPPoE",
+                    "WinPE-RNDIS"
+                ],
+                "诊断工具": [
+                    "WinPE-Dot3Svc",
+                    "WinPE-RSAT",
+                    "WinPE-StorageWMI"
+                ],
+                "安全防护": [
+                    "WinPE-EnhancedStorage",
+                    "WinPE-SecureBoot",
+                    "WinPE-SecureBootCmdlets"
+                ],
+                "数据访问": [
+                    "WinPE-MDAC"
+                ],
+                "服务器支持": [
+                    "WinPE-Setup-Server",
+                    "WinPE-LegacySetup",
+                    "WinPE-WDS-Tools"
+                ],
+                "硬件支持": [
+                    "WinPE-GamingPeripherals"
+                ],
+                "字体支持": [
+                    "WinPE-Fonts-Legacy",
+                    "WinPE-FontSupport-WinRE",
+                    "WinPE-FontSupport-JA-JP",
+                    "WinPE-FontSupport-KO-KR",
+                    "WinPE-FontSupport-ZH-CN",
+                    "WinPE-FontSupport-ZH-TW",
+                    "WinPE-FontSupport-ZH-HK"
+                ]
+            },
+            "📦 外部/第三方组件": {
+                "文件管理工具": [
+                    "ThirdParty-7Zip",
+                    "ThirdParty-NotepadPlus",
+                    "ThirdParty-ExplorerPlus",
+                    "ThirdParty-TotalCommander"
+                ],
+                "系统工具": [
+                    "ThirdParty-ProcessExplorer",
+                    "ThirdParty-DiskGenius"
+                ],
+                "网络工具": [
+                    "ThirdParty-WiFiTool",
+                    "ThirdParty-RemoteDesktop",
+                    "ThirdParty-Browser"
+                ],
+                "媒体工具": [
+                    "ThirdParty-VLC"
+                ]
+            }
         }
 
         return categories
@@ -704,3 +871,46 @@ class WinPEPackages:
             int: 组件总数
         """
         return len(self.components)
+
+    def get_official_components(self) -> List[OptionalComponent]:
+        """
+        获取所有Microsoft官方组件
+
+        Returns:
+            List[OptionalComponent]: 官方组件列表
+        """
+        return [comp for comp in self.components.values() if comp.source == "official"]
+
+    def get_external_components(self) -> List[OptionalComponent]:
+        """
+        获取所有外部/第三方组件
+
+        Returns:
+            List[OptionalComponent]: 外部组件列表
+        """
+        return [comp for comp in self.components.values() if comp.source == "external"]
+
+    def get_components_by_source(self, source: str) -> List[OptionalComponent]:
+        """
+        根据来源获取组件列表
+
+        Args:
+            source: 组件来源（"official" 或 "external"）
+
+        Returns:
+            List[OptionalComponent]: 指定来源的组件列表
+        """
+        return [comp for comp in self.components.values() if comp.source == source]
+
+    def get_source_statistics(self) -> Dict[str, int]:
+        """
+        获取组件来源统计信息
+
+        Returns:
+            Dict[str, int]: 各来源的组件数量统计
+        """
+        stats = {"official": 0, "external": 0}
+        for comp in self.components.values():
+            if comp.source in stats:
+                stats[comp.source] += 1
+        return stats
