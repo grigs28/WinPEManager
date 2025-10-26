@@ -537,3 +537,307 @@ class EventHandlers:
         except Exception as e:
             log_error(e, "打开URL")
             QMessageBox.warning(self.main_window, "错误", f"无法打开链接: {str(e)}")
+
+    def show_wim_manager(self):
+        """显示WIM管理对话框"""
+        try:
+            from ui.main_window.wim_manager import WIMManager
+            
+            # 创建WIM管理器
+            wim_manager = WIMManager(self.main_window)
+            
+            # 显示WIM管理对话框
+            wim_manager.show_wim_manager_dialog()
+            
+        except Exception as e:
+            log_error(e, "显示WIM管理对话框")
+            QMessageBox.warning(self.main_window, "错误", f"显示WIM管理对话框失败: {str(e)}")
+
+    def make_usb_bootable(self):
+        """制作USB启动盘"""
+        try:
+            # 获取当前选中的构建目录
+            current_item = self.main_window.builds_list.currentItem()
+            if not current_item:
+                QMessageBox.warning(self.main_window, "提示", "请先选择一个构建目录")
+                return
+            
+            # 获取构建目录路径
+            build_dir = Path(current_item.text().split(" - ")[0])
+            
+            # 检查构建目录是否存在
+            if not build_dir.exists():
+                QMessageBox.warning(self.main_window, "错误", f"构建目录不存在: {build_dir}")
+                return
+            
+            # 查找WIM文件
+            wim_files = []
+            boot_wim = build_dir / "media" / "sources" / "boot.wim"
+            winpe_wim = build_dir / "winpe.wim"
+            
+            if boot_wim.exists():
+                wim_files.append(boot_wim)
+            if winpe_wim.exists():
+                wim_files.append(winpe_wim)
+            
+            if not wim_files:
+                QMessageBox.warning(self.main_window, "错误", f"在构建目录中未找到WIM文件: {build_dir}")
+                return
+            
+            # 选择USB驱动器
+            usb_path = QFileDialog.getExistingDirectory(
+                self.main_window,
+                "选择USB驱动器",
+                "",
+                QFileDialog.ShowDirsOnly
+            )
+            
+            if not usb_path:
+                return
+            
+            usb_path = Path(usb_path)
+            
+            # 确认制作USB启动盘
+            reply = QMessageBox.question(
+                self.main_window,
+                "确认制作USB启动盘",
+                f"即将制作USB启动盘:\n\n"
+                f"构建目录: {build_dir.name}\n"
+                f"WIM文件数量: {len(wim_files)}\n"
+                f"USB驱动器: {usb_path}\n\n"
+                f"⚠️ 警告: 此操作将格式化USB驱动器并删除所有数据！\n\n"
+                f"确定要继续吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # 检查管理员权限
+            import ctypes
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                reply = QMessageBox.question(
+                    self.main_window,
+                    "需要管理员权限",
+                    "USB启动盘制作需要管理员权限。\n\n是否以管理员身份重新启动程序？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    self.restart_as_admin()
+                return
+            
+            self.main_window.log_message(f"开始制作USB启动盘: {build_dir.name} -> {usb_path}")
+            
+            # 创建进度对话框
+            from PyQt5.QtWidgets import QProgressDialog
+            progress = QProgressDialog("正在制作USB启动盘...", "取消", 0, 100, self.main_window)
+            progress.setWindowTitle("制作USB启动盘")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            try:
+                # 执行USB启动盘制作
+                success, message = self._create_usb_bootable_device(wim_files, usb_path, progress)
+                
+                progress.setValue(100)
+                progress.close()
+                
+                if success:
+                    QMessageBox.information(self.main_window, "制作成功", f"USB启动盘制作成功:\n{usb_path}")
+                    self.main_window.log_message(f"USB启动盘制作成功: {usb_path}")
+                else:
+                    QMessageBox.critical(self.main_window, "制作失败", f"USB启动盘制作失败:\n{message}")
+                    self.main_window.log_message(f"USB启动盘制作失败: {message}")
+                    
+            except Exception as e:
+                progress.close()
+                log_error(e, "制作USB启动盘")
+                QMessageBox.critical(self.main_window, "错误", f"制作USB启动盘时发生错误: {str(e)}")
+                
+        except Exception as e:
+            log_error(e, "制作USB启动盘")
+            QMessageBox.critical(self.main_window, "错误", f"制作USB启动盘时发生错误: {str(e)}")
+    
+    def _create_usb_bootable_device(self, wim_files, usb_path, progress):
+        """制作USB启动盘设备"""
+        try:
+            progress.setValue(10)
+            progress.setLabelText("准备USB设备...")
+            
+            # 检查USB路径是否存在
+            if not usb_path.exists():
+                return False, f"USB驱动器路径不存在: {usb_path}"
+            
+            progress.setValue(20)
+            progress.setLabelText("格式化USB设备...")
+            
+            # 格式化USB设备
+            format_success, format_message = self._format_usb_device(usb_path)
+            if not format_success:
+                return False, f"USB设备格式化失败: {format_message}"
+            
+            progress.setValue(40)
+            progress.setLabelText("复制WIM文件...")
+            
+            # 复制WIM文件到USB设备
+            for wim_file in wim_files:
+                copy_success, copy_message = self._copy_wim_to_usb(wim_file, usb_path)
+                if not copy_success:
+                    return False, f"WIM文件复制失败: {copy_message}"
+            
+            progress.setValue(60)
+            progress.setLabelText("设置启动扇区...")
+            
+            # 设置启动扇区
+            boot_success, boot_message = self._setup_usb_boot_sector(usb_path)
+            if not boot_success:
+                return False, f"启动扇区设置失败: {boot_message}"
+            
+            progress.setValue(80)
+            progress.setLabelText("验证USB启动盘...")
+            
+            # 验证USB启动盘
+            verify_success, verify_message = self._verify_usb_bootable(usb_path)
+            if not verify_success:
+                return False, f"USB启动盘验证失败: {verify_message}"
+            
+            progress.setValue(100)
+            return True, f"USB启动盘制作成功: {usb_path}"
+            
+        except Exception as e:
+            return False, f"制作USB启动盘时发生错误: {str(e)}"
+    
+    def _format_usb_device(self, usb_path):
+        """格式化USB设备"""
+        try:
+            import subprocess
+            from pathlib import Path
+            
+            # 使用Windows格式化命令
+            drive = str(usb_path)[:2]
+            
+            # 格式化为FAT32文件系统
+            cmd = f'format {drive}: /FS:FAT32 /Q /X'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                return True, "USB设备格式化成功"
+            else:
+                return False, f"格式化命令失败: {result.stderr}"
+                
+        except Exception as e:
+            return False, f"格式化USB设备时发生错误: {str(e)}"
+    
+    def _copy_wim_to_usb(self, wim_file, usb_path):
+        """复制WIM文件到USB设备"""
+        try:
+            import shutil
+            
+            dest_path = usb_path / wim_file.name
+            shutil.copy2(wim_file, dest_path)
+            
+            return True, "WIM文件复制成功"
+            
+        except Exception as e:
+            return False, f"复制WIM文件时发生错误: {str(e)}"
+    
+    def _setup_usb_boot_sector(self, usb_path):
+        """设置USB启动扇区"""
+        try:
+            import subprocess
+            from pathlib import Path
+            
+            # 使用diskpart设置活动分区
+            drive = str(usb_path)[:2]
+            
+            script = f"""
+select volume {drive}=1
+active
+exit
+"""
+            
+            # 创建临时脚本文件
+            script_file = usb_path / "setup_boot.txt"
+            with open(script_file, 'w') as f:
+                f.write(script)
+            
+            # 执行diskpart命令
+            cmd = f'diskpart /s {script_file}'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            # 清理临时文件
+            try:
+                script_file.unlink()
+            except:
+                pass
+            
+            if result.returncode == 0:
+                return True, "USB启动扇区设置成功"
+            else:
+                return False, f"启动扇区设置失败: {result.stderr}"
+                
+        except Exception as e:
+            return False, f"设置USB启动扇区时发生错误: {str(e)}"
+    
+    def _verify_usb_bootable(self, usb_path):
+        """验证USB启动盘"""
+        try:
+            from pathlib import Path
+            import subprocess
+            
+            # 检查关键文件是否存在
+            wim_files = list(usb_path.glob("*.wim"))
+            
+            if not wim_files:
+                return False, "USB设备上未找到WIM文件"
+            
+            # 检查启动扇区
+            drive = str(usb_path)[:2]
+            cmd = f'diskpart /s "list volume"'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # 检查是否有活动分区
+                if "Active" in result.stdout:
+                    return True, "USB启动盘验证成功"
+                else:
+                    return False, "USB设备未设置活动分区"
+            else:
+                return False, f"无法验证启动扇区: {result.stderr}"
+                
+        except Exception as e:
+            return False, f"验证USB启动盘时发生错误: {str(e)}"
+    
+    def restart_as_admin(self):
+        """以管理员身份重新启动程序"""
+        try:
+            import sys
+            import ctypes
+            from pathlib import Path
+            
+            # 获取当前程序路径
+            if hasattr(sys, 'frozen'):
+                current_exe = sys.executable
+            else:
+                current_exe = str(Path(__file__).parent.parent.parent / "main.py")
+            
+            # 请求管理员权限重新启动
+            ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                current_exe,
+                " ".join(sys.argv[1:]),
+                None,
+                1
+            )
+            
+            # 退出当前程序
+            from PyQt5.QtWidgets import QApplication
+            QApplication.quit()
+            sys.exit(0)
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "重新启动失败", f"无法以管理员身份重新启动程序: {str(e)}")

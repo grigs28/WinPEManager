@@ -587,6 +587,13 @@ class UICreators:
         apply_3d_button_style_red(clear_all_builds_btn)  # 应用红色立体样式
         builds_btn_layout.addWidget(clear_all_builds_btn)
 
+        # WIM管理按钮
+        wim_manager_btn = QPushButton("WIM管理")
+        wim_manager_btn.clicked.connect(self.main_window.show_wim_manager)
+        wim_manager_btn.setMinimumHeight(50)
+        apply_3d_button_style(wim_manager_btn)  # 应用蓝色立体样式
+        builds_btn_layout.addWidget(wim_manager_btn)
+
         builds_layout.addLayout(builds_btn_layout)
         layout.addWidget(builds_group)
 
@@ -610,6 +617,13 @@ class UICreators:
         self.main_window.make_iso_btn.clicked.connect(self.main_window.make_iso_direct)
         apply_3d_button_style(self.main_window.make_iso_btn)  # 应用蓝色立体样式
         build_btn_layout.addWidget(self.main_window.make_iso_btn)
+
+        # 制作USB启动盘按钮
+        self.main_window.make_usb_btn = QPushButton("制作USB启动盘")
+        self.main_window.make_usb_btn.setMinimumHeight(50)
+        self.main_window.make_usb_btn.clicked.connect(self.main_window.make_usb_bootable)
+        apply_3d_button_style(self.main_window.make_usb_btn)  # 应用蓝色立体样式
+        build_btn_layout.addWidget(self.main_window.make_usb_btn)
 
         control_layout.addLayout(build_btn_layout)
 

@@ -327,6 +327,14 @@ class MainWindow(QMainWindow):
         """显示桌面环境配置对话框"""
         self.event_handlers.show_desktop_config_dialog()
 
+    def show_wim_manager(self):
+        """显示WIM管理对话框"""
+        self.event_handlers.show_wim_manager()
+
+    def make_usb_bootable(self):
+        """制作USB启动盘"""
+        self.event_handlers.make_usb_bootable()
+
     def closeEvent(self, event):
         """窗口关闭事件"""
         try:
