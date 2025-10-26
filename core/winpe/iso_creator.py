@@ -62,7 +62,9 @@ class ISOCreator:
                 
                 from .mount_manager import MountManager
                 mount_manager = MountManager(self.config, self.adk, self.parent_callback)
-                unmount_success, unmount_msg = mount_manager.unmount_winpe_image(current_build_path, discard=False)
+                # copype模式下，WIM文件位于 media/sources/boot.wim
+                wim_file_path = current_build_path / "media" / "sources" / "boot.wim"
+                unmount_success, unmount_msg = mount_manager.unmount_winpe_image(wim_file_path, discard=False)
                 if not unmount_success:
                     logger.warning(f"卸载镜像失败: {unmount_msg}")
                     if ENHANCED_LOGGING_AVAILABLE:

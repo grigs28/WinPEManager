@@ -1019,16 +1019,11 @@ class BuildManagers:
                 self.main_window.on_build_log("开始制作ISO（DISM模式）...")
                 self.main_window.on_build_progress("正在挂载WIM文件...", 30)
 
-                # 创建临时挂载目录
-                mount_dir = build_dir / "mount"
-                self.main_window.log_message(f"📂 创建挂载目录: {mount_dir}")
-                mount_dir.mkdir(exist_ok=True)
-
-                # 挂载WIM文件
+                # 挂载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
                 self.main_window.log_message("🔌 开始挂载WIM文件...")
-                success, message = mount_manager.mount_wim(wim_path, str(mount_dir))
+                success, message = mount_manager.mount_winpe_image(wim_path)
                 self.main_window.log_message(f"📊 挂载结果: success={success}, message={message}")
-                
+
                 if not success:
                     self.main_window.log_message(f"❌ 挂载WIM文件失败：{message}")
                     return False, f"挂载WIM文件失败：{message}"
@@ -1037,16 +1032,20 @@ class BuildManagers:
                     self.main_window.log_message("✅ WIM文件挂载成功")
                     self.main_window.on_build_progress("正在制作ISO...", 60)
 
+                    # 获取正确的挂载目录路径
+                    actual_mount_dir = wim_path.parent / "mount"
+                    self.main_window.log_message(f"📂 使用挂载目录: {actual_mount_dir}")
+
                     # 从挂载目录制作ISO
                     self.main_window.log_message("🚀 从挂载目录制作ISO...")
-                    success, message = iso_creator.create_bootable_iso(Path(mount_dir), iso_path)
+                    success, message = iso_creator.create_bootable_iso(actual_mount_dir, iso_path)
                     self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
 
                 finally:
-                    # 卸载WIM文件
+                    # 卸载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
                     self.main_window.log_message("🔌 开始卸载WIM文件...")
                     self.main_window.on_build_progress("正在清理...", 90)
-                    unmount_success, unmount_message = mount_manager.unmount_wim(str(mount_dir), commit=False)
+                    unmount_success, unmount_message = mount_manager.unmount_winpe_image(wim_path, discard=True)
                     self.main_window.log_message(f"📊 卸载结果: success={unmount_success}, message={unmount_message}")
                     
                     if not unmount_success:

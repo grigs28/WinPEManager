@@ -293,18 +293,18 @@ class LanguageConfig:
                 'enable_winpe_scripting': True
             }
 
-            # 获取挂载路径
-            mount_dir = current_build_path / "mount"
+            # copype模式下，WIM文件位于 media/sources/boot.wim
+            wim_file_path = current_build_path / "media" / "sources" / "boot.wim"
+            # 获取挂载路径 (WIM文件所在目录 + /mount)
+            mount_dir = wim_file_path.parent / "mount"
             if not mount_dir.exists():
                 logger.info("WinPE镜像未挂载，尝试挂载...")
                 from .mount_manager import MountManager
                 mount_manager = MountManager(self.config, self.adk, self.parent_callback)
-                success, message = mount_manager.mount_winpe_image(current_build_path)
+                success, message = mount_manager.mount_winpe_image(wim_file_path)
                 if not success:
                     logger.warning(f"无法挂载WinPE镜像: {message}")
                     # 继续执行其他设置
-                else:
-                    mount_dir = current_build_path / "mount"
 
             # 设置暂存空间
             if mount_dir.exists():

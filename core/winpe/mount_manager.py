@@ -8,6 +8,7 @@
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import logging
@@ -82,7 +83,7 @@ class MountManager:
                 if existing_files:
                     logger.warning(f"检测到挂载目录不为空，包含 {len(existing_files)} 个文件/目录")
                     logger.info("尝试清理挂载目录...")
-                    cleanup_success, cleanup_msg = self.unmount_winpe_image(current_build_path, discard=True)
+                    cleanup_success, cleanup_msg = self.unmount_winpe_image(wim_file_path, discard=True)
                     if cleanup_success:
                         logger.info("挂载目录清理成功")
                     else:
@@ -271,15 +272,89 @@ class MountManager:
                 logger.error(f"标准输出: {stdout}")
                 logger.error(f"错误输出: {stderr}")
 
-                # 尝试强制清理
-                logger.warning("尝试强制清理挂载目录...")
-                try:
-                    shutil.rmtree(mount_dir)
-                    logger.info("强制清理挂载目录成功")
-                    return True, f"卸载命令失败但已强制清理目录"
-                except Exception as cleanup_error:
-                    logger.error(f"强制清理失败: {cleanup_error}")
-                    return False, f"卸载WinPE镜像失败: {stderr}"
+                # DISM卸载失败，尝试多种清理方法
+                logger.warning(f"DISM卸载失败，错误代码0xc1420117 - 文件可能被锁定")
+                logger.warning("尝试多种清理方法...")
+
+                cleanup_success = False
+                cleanup_methods = []
+
+                # 方法1: 等待几秒钟后重试卸载（释放可能的文件锁定）
+                logger.info("等待5秒后重试卸载...")
+                time.sleep(5)
+                retry_success, retry_stdout, retry_stderr = self.adk.run_dism_command(args)
+                if retry_success:
+                    logger.info("重试卸载成功")
+                    cleanup_success = True
+                    cleanup_methods.append("重试DISM卸载")
+                else:
+                    cleanup_methods.append(f"重试DISM卸载失败: {retry_stderr}")
+
+                # 方法2: 尝试使用/remount选项重新挂载再卸载
+                if not cleanup_success:
+                    logger.info("尝试重新挂载后卸载...")
+                    remount_args = ["/remount-wim", "/mountdir:" + mount_dir_str]
+                    remount_success, _, _ = self.adk.run_dism_command(remount_args)
+                    if remount_success:
+                        logger.info("重新挂载成功，再次尝试卸载...")
+                        unmount_success, _, _ = self.adk.run_dism_command(args)
+                        if unmount_success:
+                            cleanup_success = True
+                            cleanup_methods.append("重新挂载后卸载")
+                        else:
+                            cleanup_methods.append("重新挂载后卸载失败")
+                    else:
+                        cleanup_methods.append("重新挂载失败")
+
+                # 方法3: 检查并终止可能使用挂载目录的进程
+                if not cleanup_success:
+                    logger.info("检查可能使用挂载目录的进程...")
+                    try:
+                        # 使用handle.exe或lsof来检查文件句柄（Windows使用handle）
+                        result = subprocess.run(['tasklist', '/fi', 'imagename eq dism.exe'],
+                                             capture_output=True, text=True, timeout=10)
+                        if 'dism.exe' in result.stdout:
+                            logger.info("发现运行中的DISM进程，尝试终止...")
+                            subprocess.run(['taskkill', '/f', '/im', 'dism.exe'],
+                                         capture_output=True, timeout=10)
+                            time.sleep(2)  # 等待进程完全终止
+                            cleanup_methods.append("终止DISM进程")
+                    except Exception as handle_e:
+                        logger.debug(f"检查进程失败: {handle_e}")
+                        cleanup_methods.append("进程检查失败")
+
+                # 方法4: 强制删除挂载目录
+                if not cleanup_success:
+                    logger.info("尝试强制删除挂载目录...")
+                    try:
+                        # 尝试正常删除
+                        shutil.rmtree(mount_dir)
+                        logger.info("强制删除挂载目录成功")
+                        cleanup_success = True
+                        cleanup_methods.append("强制删除目录")
+                    except Exception as e:
+                        logger.warning(f"强制删除失败: {e}")
+                        # 尝试使用管理员权限删除
+                        try:
+                            import subprocess
+                            result = subprocess.run(['cmd', '/c', 'rmdir', '/s', '/q', str(mount_dir)],
+                                                 capture_output=True, text=True, timeout=30)
+                            if result.returncode == 0:
+                                logger.info("管理员权限删除目录成功")
+                                cleanup_success = True
+                                cleanup_methods.append("管理员权限删除目录")
+                            else:
+                                cleanup_methods.append(f"管理员权限删除失败: {result.stderr}")
+                        except Exception as admin_e:
+                            cleanup_methods.append(f"管理员权限删除异常: {admin_e}")
+
+                # 汇总清理结果
+                if cleanup_success:
+                    logger.info(f"清理成功，使用的方法: {' -> '.join(cleanup_methods)}")
+                    return True, f"卸载命令失败但已通过以下方法清理: {' -> '.join(cleanup_methods)}"
+                else:
+                    logger.error(f"所有清理方法都失败了: {' -> '.join(cleanup_methods)}")
+                    return False, f"卸载WinPE镜像失败，所有清理方法都失败: {stderr}"
 
         except Exception as e:
             error_msg = f"卸载WinPE镜像时发生错误: {str(e)}"
@@ -331,24 +406,24 @@ class MountManager:
             logger.error(error_msg)
             return False, error_msg
 
-    def cleanup_mount_directory(self, current_build_path: Path) -> bool:
+    def cleanup_mount_directory(self, wim_file_path: Path) -> bool:
         """清理挂载目录
 
         Args:
-            current_build_path: 当前构建路径
+            wim_file_path: WIM文件路径
 
         Returns:
             bool: 是否成功清理
         """
         try:
-            mount_dir = current_build_path / "mount"
-            
+            mount_dir = wim_file_path.parent / "mount"
+
             if not mount_dir.exists():
                 return True
 
             # 如果目录不为空，先尝试卸载
             if list(mount_dir.iterdir()):
-                success, _ = self.unmount_winpe_image(current_build_path, discard=True)
+                success, _ = self.unmount_winpe_image(wim_file_path, discard=True)
                 if not success:
                     logger.warning("卸载失败，尝试强制删除挂载目录")
 

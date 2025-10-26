@@ -117,7 +117,9 @@ class WinPEBuilder:
                 return False, "工作空间未初始化"
 
             # 使用挂载管理器挂载镜像
-            return self.mount_manager.mount_winpe_image(self.current_build_path)
+            # copype模式下，WIM文件位于 media/sources/boot.wim
+            wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
+            return self.mount_manager.mount_winpe_image(wim_file_path)
 
         except Exception as e:
             error_msg = f"挂载WinPE镜像失败: {str(e)}"
@@ -198,7 +200,9 @@ class WinPEBuilder:
                 return False, "工作空间未初始化"
 
             # 使用挂载管理器卸载镜像
-            return self.mount_manager.unmount_winpe_image(self.current_build_path, discard)
+            # copype模式下，WIM文件位于 media/sources/boot.wim
+            wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
+            return self.mount_manager.unmount_winpe_image(wim_file_path, discard)
 
         except Exception as e:
             error_msg = f"卸载WinPE镜像失败: {str(e)}"
@@ -485,7 +489,9 @@ class WinPEBuilder:
         """清理构建过程产生的临时文件"""
         try:
             if self.current_build_path and self.current_build_path.exists():
-                self.mount_manager.cleanup_mount_directory(self.current_build_path)
+                # copype模式下，WIM文件位于 media/sources/boot.wim
+                wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
+                self.mount_manager.cleanup_mount_directory(wim_file_path)
         except Exception as e:
             logger.error(f"清理时发生错误: {str(e)}")
 
@@ -506,8 +512,9 @@ class WinPEBuilder:
             }
 
             if self.current_build_path and self.current_build_path.exists():
-                # 检查挂载状态
-                status["is_mounted"] = self.mount_manager.is_mounted(self.current_build_path)
+                # 检查挂载状态 (需要传递WIM文件路径而不是构建目录)
+                wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
+                status["is_mounted"] = self.mount_manager.is_mounted(wim_file_path)
                 
                 # 检查Media目录
                 media_path = self.current_build_path / "media"
