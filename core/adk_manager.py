@@ -667,6 +667,18 @@ class ADKManager:
             # 添加更详细的日志
             logger.info(f"开始执行MakeWinPEMedia命令，参数: {args}")
 
+            # 检查是否为ISO创建命令，如果是，先尝试删除现有ISO文件
+            if len(args) >= 3 and args[0].upper() == '/ISO':
+                iso_path = args[-1]  # 最后一个参数是ISO路径
+                import os
+                if os.path.exists(iso_path):
+                    logger.info(f"检测到现有ISO文件，将先删除: {iso_path}")
+                    try:
+                        os.remove(iso_path)
+                        logger.info(f"成功删除现有ISO文件: {iso_path}")
+                    except Exception as e:
+                        logger.warning(f"无法删除现有ISO文件: {iso_path}, 错误: {str(e)}")
+
             if capture_output:
                 # 使用超时机制和更详细的错误处理
                 result = subprocess.run(

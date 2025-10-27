@@ -635,6 +635,24 @@ class UICreators:
         apply_3d_button_style(open_build_btn)  # 应用蓝色立体样式
         builds_btn_layout.addWidget(open_build_btn)
 
+        # 挂载WIM按钮
+        mount_wim_btn = QPushButton("挂载WIM")
+        mount_wim_btn.clicked.connect(self.main_window.mount_selected_wim)
+        apply_3d_button_style(mount_wim_btn)  # 应用蓝色立体样式
+        builds_btn_layout.addWidget(mount_wim_btn)
+
+        # 卸载WIM保存按钮
+        unmount_commit_btn = QPushButton("卸载保存")
+        unmount_commit_btn.clicked.connect(self.main_window.unmount_selected_wim_commit)
+        apply_3d_button_style_alternate(unmount_commit_btn)  # 应用橙色立体样式
+        builds_btn_layout.addWidget(unmount_commit_btn)
+
+        # 卸载WIM不保存按钮
+        unmount_discard_btn = QPushButton("卸载不保存")
+        unmount_discard_btn.clicked.connect(self.main_window.unmount_selected_wim_discard)
+        apply_3d_button_style_red(unmount_discard_btn)  # 应用红色立体样式
+        builds_btn_layout.addWidget(unmount_discard_btn)
+
         # 清空全部按钮
         clear_all_builds_btn = QPushButton("清空全部")
         clear_all_builds_btn.clicked.connect(self.main_window.clear_all_builds)

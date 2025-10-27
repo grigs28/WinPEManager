@@ -246,12 +246,41 @@ class OperationManager:
             if iso_path is None:
                 iso_path_str = self.config.get("output.iso_path", "")
                 if not iso_path_str:
-                    workspace = self.config.get("output.workspace", "")
-                    if not workspace:
-                        workspace = Path.cwd() / "workspace" / "WinPE_Build"
-                    iso_path = workspace / "WinPE.iso"
+                    configured_workspace = self.config.get("output.workspace", "").strip()
+                    if configured_workspace:
+                        workspace = Path(configured_workspace)
+                    else:
+                        # 使用基于架构的默认工作空间
+                        architecture = self.config.get("winpe.architecture", "amd64")
+                        workspace = Path.cwd() / f"WinPE_{architecture}"
+
+                    # 从构建目录中提取时间戳，生成唯一的ISO文件名
+                    import datetime
+                    build_dir_name = build_dir.name
+                    if "WinPE_" in build_dir_name:
+                        timestamp = build_dir_name.replace("WinPE_", "")
+                        iso_filename = f"WinPE_{timestamp}.iso"
+                    else:
+                        # 如果构建目录名不包含时间戳，使用当前时间
+                        current_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        iso_filename = f"WinPE_{current_timestamp}.iso"
+
+                    # 创建output目录
+                    output_dir = Path.cwd() / "output"
+                    output_dir.mkdir(exist_ok=True)
+                    iso_path = output_dir / iso_filename
+
+                    self.logger.info(f"生成的ISO文件名: {iso_filename}")
                 else:
                     iso_path = Path(iso_path_str)
+
+                    # 如果用户配置了固定路径但文件已存在，添加时间戳后缀
+                    if iso_path.exists():
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        stem = iso_path.stem
+                        suffix = iso_path.suffix
+                        iso_path = iso_path.parent / f"{stem}_{timestamp}{suffix}"
+                        self.logger.info(f"文件已存在，使用新文件名: {iso_path.name}")
             
             iso_path = Path(iso_path)
             self.logger.info(f"ISO输出路径: {iso_path}")
@@ -284,6 +313,11 @@ class OperationManager:
                 log_command(" ".join(args), "创建ISO文件")
                 
                 # 执行MakeWinPEMedia命令
+                self.logger.info("执行MakeWinPEMedia命令...")
+                if iso_path.exists():
+                    self.logger.info(f"目标ISO文件已存在: {iso_path}")
+                    self.logger.info("将自动覆盖现有ISO文件")
+
                 success, stdout, stderr = self.adk.run_make_winpe_media_command(args)
                 
                 if success:

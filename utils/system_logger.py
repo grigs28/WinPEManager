@@ -39,11 +39,11 @@ class SystemLogHandler(logging.Handler):
         self.log_type = log_type
         self.server = None  # 本地计算机
         self.enabled = WIN32_AVAILABLE
-        
+
         if not self.enabled:
             print("警告: win32evtlog模块不可用，系统日志功能将被禁用")
             return
-            
+
         try:
             # 确保应用程序已注册为事件源
             self._register_event_source()
@@ -145,6 +145,29 @@ class SystemLogHandler(logging.Handler):
     def close(self):
         """关闭处理器"""
         super().close()
+
+    def formatException(self, exc_info):
+        """格式化异常信息
+
+        Args:
+            exc_info: 异常信息元组 (type, value, traceback)
+
+        Returns:
+            str: 格式化后的异常信息
+        """
+        if not exc_info:
+            return ""
+
+        try:
+            # 使用标准格式化器来格式化异常
+            import traceback
+            formatter = logging.Formatter()
+            formatted_exception = formatter.formatException(exc_info)
+            return formatted_exception
+        except Exception:
+            # 如果格式化失败，返回基本信息
+            exc_type, exc_value, _ = exc_info
+            return f"{exc_type.__name__}: {exc_value}"
 
 
 class BuildLogHandler(logging.Handler):

@@ -253,6 +253,18 @@ class MainWindow(QMainWindow):
         """打开选中的构建目录"""
         self.build_managers.open_selected_build()
 
+    def mount_selected_wim(self):
+        """挂载选中的WIM映像"""
+        self.build_managers.mount_selected_wim()
+
+    def unmount_selected_wim_commit(self):
+        """卸载选中的WIM映像并保存更改"""
+        self.build_managers.unmount_selected_wim_commit()
+
+    def unmount_selected_wim_discard(self):
+        """卸载选中的WIM映像不保存更改"""
+        self.build_managers.unmount_selected_wim_discard()
+
     def on_build_progress(self, message: str, value: int):
         """构建进度更新"""
         self.build_managers.on_build_progress(message, value)

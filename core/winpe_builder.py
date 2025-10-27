@@ -60,25 +60,46 @@ class WinPEBuilder:
         self.wim_manager = UnifiedWIMManager(config_manager, adk_manager, parent_callback)
 
     def initialize_workspace(self, use_copype: bool = None) -> Tuple[bool, str]:
-        """初始化工作空间
+        """初始化工作空间 - 简化版本
+
+        工作空间逻辑：
+        1. 优先使用用户配置的工作空间路径
+        2. 如果未配置，自动使用基于架构的工作空间 (WinPE_{architecture})
+        3. 直接在工作空间下创建时间戳构建目录
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
         try:
-            if not self.workspace:
-                # 使用默认工作空间
-                self.workspace = Path.cwd() / "workspace" / "WinPE_Build"
+            # 优先使用用户配置的工作空间
+            configured_workspace = self.config.get("output.workspace", "").strip()
+            if configured_workspace:
+                self.workspace = Path(configured_workspace)
+                logger.info(f"使用用户配置的工作空间: {self.workspace}")
+            else:
+                # 回退到基于架构的默认工作空间
+                architecture = self.config.get("winpe.architecture", "amd64")
+                self.workspace = Path.cwd() / f"WinPE_{architecture}"
+                logger.info(f"使用默认工作空间: {self.workspace}")
 
-            # 使用基础镜像管理器初始化工作空间
-            success, message = self.base_image_manager.initialize_workspace(self.workspace)
-            if success:
-                # 获取创建的构建路径
-                import datetime
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                self.current_build_path = self.workspace / f"WinPE_{timestamp}"
-            
-            return success, message
+            # 创建工作空间目录
+            self.workspace.mkdir(parents=True, exist_ok=True)
+
+            # 创建时间戳构建目录
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.current_build_path = self.workspace / f"WinPE_{timestamp}"
+            self.current_build_path.mkdir(exist_ok=True)
+
+            # 使用基础镜像管理器初始化构建目录的子目录
+            success, message = self.base_image_manager.initialize_workspace(self.current_build_path)
+            if not success:
+                return False, message
+
+            logger.info(f"工作空间初始化完成: {self.workspace}")
+            logger.info(f"构建目录: {self.current_build_path}")
+
+            return True, f"工作空间初始化成功: {self.workspace}"
 
         except Exception as e:
             error_msg = f"初始化工作空间失败: {str(e)}"

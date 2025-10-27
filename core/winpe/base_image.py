@@ -23,36 +23,28 @@ class BaseImageManager:
         self.adk = adk_manager
         self.parent_callback = parent_callback
 
-    def initialize_workspace(self, workspace: Path) -> Tuple[bool, str]:
-        """初始化工作空间
+    def initialize_workspace(self, build_dir: Path) -> Tuple[bool, str]:
+        """初始化构建目录 - 简化版本
 
         Args:
-            workspace: 工作空间路径
+            build_dir: 构建目录路径 (由winpe_builder创建)
 
         Returns:
             Tuple[bool, str]: (成功状态, 消息)
         """
         try:
-            if not workspace:
-                # 使用默认工作空间
-                workspace = Path.cwd() / "workspace" / "WinPE_Build"
-
-            # 创建工作空间目录
-            workspace.mkdir(parents=True, exist_ok=True)
-            logger.info(f"工作空间根目录: {workspace}")
-
-            # 设置当前构建路径
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            current_build_path = workspace / f"WinPE_{timestamp}"
-            current_build_path.mkdir(exist_ok=True)
-            logger.info(f"创建构建目录: {current_build_path}")
+            # 确保构建目录存在
+            if not build_dir.exists():
+                build_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"创建构建目录: {build_dir}")
+            else:
+                logger.info(f"使用现有构建目录: {build_dir}")
 
             # 创建必要的子目录
             subdirs = ["mount", "module/drivers", "scripts", "files", "logs"]
             created_dirs = []
             for subdir in subdirs:
-                dir_path = current_build_path / subdir
+                dir_path = build_dir / subdir
                 dir_path.mkdir(exist_ok=True, parents=True)
                 if dir_path.exists():
                     created_dirs.append(subdir)
@@ -60,7 +52,7 @@ class BaseImageManager:
             logger.info(f"创建子目录: {', '.join(created_dirs)}")
 
             # 检查磁盘空间
-            disk_usage = shutil.disk_usage(str(current_build_path))
+            disk_usage = shutil.disk_usage(str(build_dir))
             free_gb = disk_usage.free / (1024**3)
             logger.info(f"可用磁盘空间: {free_gb:.1f}GB")
 
@@ -69,8 +61,8 @@ class BaseImageManager:
             else:
                 logger.info(f"磁盘空间充足: {free_gb:.1f}GB 可用")
 
-            logger.info(f"工作空间初始化成功: {current_build_path}")
-            return True, f"工作空间初始化成功: {current_build_path}"
+            logger.info(f"构建目录初始化成功: {build_dir}")
+            return True, f"构建目录初始化成功: {build_dir}"
 
         except Exception as e:
             error_msg = f"初始化工作空间失败: {str(e)}"

@@ -7,30 +7,38 @@
 
 import datetime
 import shutil
-import subprocess
-import platform
 import ctypes
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
 
 from ui.build.build_thread import BuildThread
 from ui.button_styler import apply_3d_button_style, apply_3d_button_style_alternate, apply_3d_button_style_red
+from ui.shared.wim_operations_common import WIMOperationsCommon
 from utils.logger import log_error
 
 
 class BuildManagers:
     """构建管理器类，包含所有构建相关的方法"""
-    
+
     def __init__(self, main_window):
         self.main_window = main_window
         self.config_manager = main_window.config_manager
         self.adk_manager = main_window.adk_manager
         self.winpe_builder = main_window.winpe_builder
-    
+
+        # 初始化共享的WIM操作功能
+        self.wim_ops_common = WIMOperationsCommon(main_window, self.config_manager, self.adk_manager)
+
+        # 设置刷新回调，用于操作完成后刷新构建目录列表
+        self.wim_ops_common.add_refresh_callback(self.refresh_builds_list)
+
+        # 为开始构建页面设置WIM操作日志回调，直接使用主窗口的日志
+        # 因为在开始构建页面，操作日志应该显示在构建日志中
+        self.wim_ops_common.set_wim_log_callback(lambda msg, level: None)  # 不需要额外回调，已经在unified_log_message中处理
+
     def start_build(self):
         """开始构建WinPE"""
         try:
@@ -220,95 +228,54 @@ class BuildManagers:
             log_error(e, "停止构建")
 
     def refresh_builds_list(self):
-        """使用UnifiedWIMManager刷新已构建目录中的WIM文件列表"""
+        """使用共享功能刷新已构建目录中的WIM文件列表"""
         try:
-            self.main_window.builds_list.clear()
-
-            # 获取工作空间路径
-            workspace = Path(self.config_manager.get("output.workspace", ""))
-            if not workspace.exists():
-                workspace = Path.cwd() / "workspace" / "WinPE_Build"
-
-            # 使用UnifiedWIMManager扫描所有构建目录中的WIM文件
-            if workspace.exists():
-                from core.unified_manager import UnifiedWIMManager
-                wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.main_window)
-                all_wim_files = wim_manager.find_wim_files(workspace)
-
-                # 按修改时间排序
-                all_wim_files.sort(key=lambda x: x["build_dir"].stat().st_mtime, reverse=True)
-
-                # 添加到列表
-                for wim_file in all_wim_files:
-                    # 计算文件大小
-                    size_mb = wim_file["size"] / (1024 * 1024)
-                    size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
-
-                    # 状态文本
-                    status_text = "已挂载" if wim_file["mount_status"] else "未挂载"
-
-                    # 构建目录信息
-                    build_dir_name = wim_file["build_dir"].name
-                    import datetime
-                    ctime = wim_file["build_dir"].stat().st_ctime
-                    time_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
-
-                    # WIM相对路径
-                    wim_relative_path = str(wim_file["path"]).replace(str(wim_file["build_dir"]), "").lstrip("\\/")
-
-                    # 为已挂载项添加图标
-                    display_name = wim_file['name']
-                    if wim_file["mount_status"] and not display_name.startswith("📂 "):
-                        display_name = f"📂 {display_name}"
-
-                    # 创建显示文本
-                    item_text = f"{display_name} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {wim_relative_path}"
-
-                    from PyQt5.QtWidgets import QListWidgetItem
-                    list_item = QListWidgetItem(item_text)
-                    list_item.setData(Qt.UserRole, wim_file)
-
-                    # 设置增强的工具提示，仿照WIM管理的格式
-                    tooltip_info = (
-                        f"WIM文件: {wim_file['name']}\n"
-                        f"─────────────────\n"
-                        f"构建目录: {build_dir_name}\n"
-                        f"创建时间: {time_str}\n"
-                        f"文件大小: {size_str}\n"
-                        f"文件类型: {wim_file['type'].upper()}\n"
-                        f"挂载状态: {status_text}\n"
-                        f"相对路径: {wim_relative_path}\n"
-                        f"─────────────────\n"
-                        f"完整路径: {wim_file['path']}\n"
-                        f"构建目录: {wim_file['build_dir']}"
-                    )
-                    list_item.setToolTip(tooltip_info)
-
-                    # 设置状态样式，仿照WIM管理的逻辑
-                    if wim_file["mount_status"]:
-                        # 已挂载项使用绿色背景和图标
-                        list_item.setBackground(QColor("#E8F5E8"))
-                        list_item.setForeground(QColor("#2E7D32"))  # 深绿色文字
-                        list_item.setData(Qt.UserRole + 1, "mounted")
-                    else:
-                        # 未挂载项使用默认样式
-                        list_item.setForeground(QColor("#333333"))  # 深灰色文字
-                        list_item.setData(Qt.UserRole + 1, "unmounted")
-
-                    self.main_window.builds_list.addItem(list_item)
-
-            if self.main_window.builds_list.count() == 0:
-                self.main_window.builds_list.addItem("暂无WIM映像文件")
-
+            # 使用共享的WIM操作功能刷新列表
+            self.wim_ops_common.refresh_wim_list(self.main_window.builds_list)
         except Exception as e:
             from utils.logger import log_error
             log_error(e, "刷新构建目录WIM文件列表")
+
+    def _scan_workspace_for_wim_files(self, workspace: Path, wim_manager) -> list:
+        """扫描工作空间中所有构建目录的WIM文件
+
+        Args:
+            workspace: 工作空间路径
+            wim_manager: UnifiedWIMManager实例
+
+        Returns:
+            list: 所有找到的WIM文件信息
+        """
+        all_wim_files = []
+
+        try:
+            # 遍历工作空间中的所有子目录
+            for build_dir in workspace.iterdir():
+                # 只处理目录
+                if not build_dir.is_dir():
+                    continue
+
+                # 跳过特殊目录（如mount目录）
+                if build_dir.name in ['mount', 'temp', 'logs']:
+                    continue
+
+                # 检查是否是构建目录（包含WIM文件）
+                wim_files_in_dir = wim_manager.find_wim_files(build_dir)
+                if wim_files_in_dir:
+                    all_wim_files.extend(wim_files_in_dir)
+
+        except Exception as e:
+            from utils.logger import log_error
+            log_error(e, "扫描工作空间WIM文件")
+
+        return all_wim_files
 
     # 删除这些重复的函数，因为UnifiedWIMManager已经提供了相应的功能
 
     def on_build_item_double_clicked(self, item):
         """构建列表项双击事件，仿照WIM管理的逻辑"""
         try:
+            from PyQt5.QtCore import Qt
             wim_file = item.data(Qt.UserRole)
             if not wim_file:
                 return
@@ -383,8 +350,36 @@ class BuildManagers:
                 QMessageBox.warning(self.main_window, "提示", "请先选择要删除的构建目录")
                 return
 
-            build_path = current_item.data(Qt.UserRole)
+            # 从数据中获取构建目录路径
+            # 使用完整的Qt.UserRole路径避免作用域问题
+            from PyQt5.QtCore import Qt
+            wim_file = current_item.data(Qt.UserRole)
+            if not wim_file or not isinstance(wim_file, dict):
+                QMessageBox.warning(self.main_window, "错误", "无效的构建目录数据")
+                return
+
+            build_path = wim_file.get("build_dir")
             if not build_path:
+                QMessageBox.warning(self.main_window, "错误", "无法获取构建目录路径")
+                return
+
+            # 安全检查：确保不是工作空间目录
+            configured_workspace = self.config_manager.get("output.workspace", "").strip()
+            if configured_workspace:
+                workspace = Path(configured_workspace)
+            else:
+                architecture = self.config_manager.get("winpe.architecture", "amd64")
+                workspace = Path.cwd() / f"WinPE_{architecture}"
+
+            build_path_obj = Path(build_path)
+            if build_path_obj == workspace or build_path_obj == Path.cwd():
+                QMessageBox.critical(self.main_window, "安全错误",
+                    f"检测到尝试删除工作空间目录，操作已阻止！\n\n"
+                    f"目标路径: {build_path}\n"
+                    f"工作空间: {workspace}\n\n"
+                    f"为保护数据安全，此操作已被禁止。")
+                from utils.logger import log_error
+                log_error(f"阻止删除工作空间目录: {build_path}", "安全检查")
                 return
 
             # 确认删除
@@ -397,30 +392,77 @@ class BuildManagers:
 
             if reply == QMessageBox.Yes:
                 try:
-                    shutil.rmtree(build_path)
-                    self.main_window.log_message(f"已删除构建目录: {build_path}")
-                    self.refresh_builds_list()
-                    QMessageBox.information(self.main_window, "删除成功", f"构建目录已删除:\n{build_path}")
+                    # 使用强制删除功能处理Windows文件锁定问题
+                    from utils.file_utils import force_remove_tree
+                    from PyQt5.QtWidgets import QProgressDialog, QApplication
+
+                    # 创建进度对话框
+                    progress_dialog = QProgressDialog("正在删除构建目录...", "取消", 0, 0, self.main_window)
+                    progress_dialog.setWindowModality(Qt.WindowModal)
+                    progress_dialog.show()
+                    QApplication.processEvents()  # 确保对话框显示
+
+                    def progress_callback(message):
+                        self.main_window.log_message(f"删除进度: {message}")
+
+                    try:
+                        success = force_remove_tree(build_path, max_retries=3, delay=1.0,
+                                                   progress_callback=progress_callback)
+                        progress_dialog.close()
+
+                        if success:
+                            self.main_window.log_message(f"已删除构建目录: {build_path}")
+                            self.refresh_builds_list()
+                            QMessageBox.information(self.main_window, "删除成功", f"构建目录已删除:\n{build_path}")
+                        else:
+                            error_msg = "删除失败，请检查是否有其他程序正在使用这些文件"
+                            QMessageBox.critical(self.main_window, "删除失败", error_msg)
+
+                    except Exception as e:
+                        progress_dialog.close()
+                        error_msg = f"删除构建目录失败: {str(e)}"
+                        from utils.logger import log_error
+                        log_error(e, "删除构建目录")
+                        QMessageBox.critical(self.main_window, "删除失败", error_msg)
+
                 except Exception as e:
-                    error_msg = f"删除构建目录失败: {str(e)}"
                     from utils.logger import log_error
                     log_error(e, "删除构建目录")
-                    QMessageBox.critical(self.main_window, "删除失败", error_msg)
 
         except Exception as e:
             from utils.logger import log_error
             log_error(e, "删除构建目录")
 
     def clear_all_builds(self):
-        """清空所有构建目录"""
+        """清空所有构建目录（仅WinPE_开头的目录）"""
         try:
-            # 获取所有构建目录
+            # 获取工作空间路径
+            configured_workspace = self.config_manager.get("output.workspace", "").strip()
+            if configured_workspace:
+                workspace = Path(configured_workspace)
+            else:
+                architecture = self.config_manager.get("winpe.architecture", "amd64")
+                workspace = Path.cwd() / f"WinPE_{architecture}"
+
+            # 安全检查：获取所有WinPE_开头的构建目录
             all_builds = []
+            from PyQt5.QtCore import Qt
             for i in range(self.main_window.builds_list.count()):
                 item = self.main_window.builds_list.item(i)
-                build_path = item.data(Qt.UserRole)
-                if build_path and Path(build_path).exists():
-                    all_builds.append(build_path)
+                wim_file = item.data(Qt.UserRole)
+                if wim_file and isinstance(wim_file, dict):
+                    build_path = wim_file.get("build_dir")
+                    if build_path and Path(build_path).exists():
+                        build_path_obj = Path(build_path)
+                        # 只处理WinPE_开头的目录
+                        if build_path_obj.name.startswith("WinPE_"):
+                            # 额外安全检查：确保不删除工作空间本身
+                            if build_path_obj != workspace and build_path_obj != Path.cwd():
+                                all_builds.append(build_path)
+                            else:
+                                self.main_window.log_message(f"⚠️ 跳过受保护的目录: {build_path}")
+                        else:
+                            self.main_window.log_message(f"⚠️ 跳过非WinPE目录: {build_path}")
 
             if not all_builds:
                 QMessageBox.information(self.main_window, "提示", "没有找到可删除的构建目录")
@@ -490,20 +532,31 @@ class BuildManagers:
                             if Path(build_path).exists():
                                 dir_size = sum(f.stat().st_size for f in Path(build_path).rglob("*") if f.is_file())
 
-                            # 删除目录
-                            shutil.rmtree(build_path)
-                            success_count += 1
-                            total_freed_space += dir_size
+                            # 使用强制删除功能
+                            from utils.file_utils import force_remove_tree
 
-                            # 格式化目录大小
-                            if dir_size > 1024 * 1024:
-                                size_info = f"{dir_size / (1024**2):.1f} MB"
-                            elif dir_size > 1024:
-                                size_info = f"{dir_size / 1024:.1f} KB"
+                            def progress_callback(message):
+                                self.main_window.log_message(f"  📝 {message}")
+
+                            success = force_remove_tree(build_path, max_retries=2, delay=0.5,
+                                                       progress_callback=progress_callback)
+
+                            if success:
+                                success_count += 1
+                                total_freed_space += dir_size
+
+                                # 格式化目录大小
+                                if dir_size > 1024 * 1024:
+                                    size_info = f"{dir_size / (1024**2):.1f} MB"
+                                elif dir_size > 1024:
+                                    size_info = f"{dir_size / 1024:.1f} KB"
+                                else:
+                                    size_info = f"{dir_size} B"
+
+                                self.main_window.log_message(f"✅ 已删除: {Path(build_path).name} ({size_info})")
                             else:
-                                size_info = f"{dir_size} B"
-
-                            self.main_window.log_message(f"✅ 已删除: {Path(build_path).name} ({size_info})")
+                                failed_builds.append((build_path, "强制删除失败"))
+                                self.main_window.log_message(f"❌ 删除失败: {Path(build_path).name} - 强制删除失败")
 
                         except Exception as e:
                             failed_builds.append((build_path, str(e)))
@@ -555,27 +608,22 @@ class BuildManagers:
     def open_selected_build(self):
         """打开选中的构建目录"""
         try:
-            current_item = self.main_window.builds_list.currentItem()
-            if not current_item:
-                QMessageBox.warning(self.main_window, "提示", "请先选择要打开的构建目录")
+            # 使用共享的WIM操作功能
+            wim_file = self.wim_ops_common.get_selected_wim_info(self.main_window.builds_list)
+            if not wim_file:
+                self.wim_ops_common.show_warning("提示", "请先选择要打开的构建目录")
                 return
 
-            build_path = current_item.data(Qt.UserRole)
-            if not build_path or not build_path.exists():
+            build_path = wim_file.get("build_dir")
+            if not build_path or not Path(build_path).exists():
                 return
 
-            # 使用系统默认程序打开目录
-            if platform.system() == "Windows":
-                subprocess.run(["explorer", str(build_path)])
-            elif platform.system() == "Darwin":  # macOS
-                subprocess.run(["open", str(build_path)])
-            else:  # Linux
-                subprocess.run(["xdg-open", str(build_path)])
+            # 使用共享功能打开目录
+            self.wim_ops_common.open_directory(Path(build_path))
 
         except Exception as e:
-            from utils.logger import log_error
             log_error(e, "打开构建目录")
-            QMessageBox.warning(self.main_window, "打开失败", f"打开目录失败: {str(e)}")
+            self.wim_ops_common.show_critical("打开失败", f"打开目录失败: {str(e)}")
 
     def on_build_progress(self, message: str, value: int):
         """构建进度更新"""
@@ -677,12 +725,15 @@ class BuildManagers:
 
             # 获取工作空间和ISO路径
             self.main_window.log_message("📁 检查路径配置...")
-            workspace = Path(self.config_manager.get("output.workspace", ""))
-            if not workspace.exists():
-                workspace = Path.cwd() / "workspace" / "WinPE_Build"
-                self.main_window.log_message(f"📂 使用默认工作空间: {workspace}")
-            else:
+            configured_workspace = self.config_manager.get("output.workspace", "").strip()
+            if configured_workspace:
+                workspace = Path(configured_workspace)
                 self.main_window.log_message(f"📂 工作空间: {workspace}")
+            else:
+                # 使用基于架构的默认工作空间
+                architecture = self.config_manager.get("winpe.architecture", "amd64")
+                workspace = Path.cwd() / f"WinPE_{architecture}"
+                self.main_window.log_message(f"📂 使用默认工作空间: {workspace}")
 
             iso_path = self.config_manager.get("output.iso_path", "")
             if not iso_path:
@@ -708,7 +759,17 @@ class BuildManagers:
                 )
                 return
             
-            selected_build = current_item.data(Qt.UserRole)
+            from PyQt5.QtCore import Qt
+            wim_file = current_item.data(Qt.UserRole)
+            if not wim_file or not isinstance(wim_file, dict):
+                self.main_window.log_message("❌ 选定的构建数据无效")
+                QMessageBox.warning(
+                    self.main_window, "无效的构建数据",
+                    "选定的构建数据无效。\n\n请重新选择一个有效的构建目录。"
+                )
+                return
+
+            selected_build = wim_file.get("build_dir")
             if not selected_build or not Path(selected_build).exists():
                 self.main_window.log_message("❌ 选定的构建目录无效")
                 QMessageBox.warning(
@@ -851,3 +912,55 @@ class BuildManagers:
             QMessageBox.critical(self.main_window, "构建失败", message)
 
         self.main_window.build_thread = None
+
+    def mount_selected_wim(self):
+        """挂载选中的WIM映像"""
+        try:
+            # 使用共享功能获取选中的WIM文件
+            wim_file = self.wim_ops_common.get_selected_wim_info(self.main_window.builds_list)
+            if not wim_file:
+                self.wim_ops_common.show_warning("提示", "请先选择要挂载的WIM映像文件")
+                return
+
+            # 创建UnifiedWIMManager实例
+            from core.unified_manager import UnifiedWIMManager
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.main_window)
+
+            # 使用共享功能执行挂载操作
+            self.wim_ops_common.mount_wim_with_progress(wim_file, wim_manager)
+
+        except Exception as e:
+            log_error(e, "挂载选中的WIM映像")
+            self.wim_ops_common.show_critical("操作失败", f"挂载操作时发生错误: {str(e)}")
+
+    def unmount_selected_wim_commit(self):
+        """卸载选中的WIM映像并保存更改"""
+        self.unmount_selected_wim(commit=True)
+
+    def unmount_selected_wim_discard(self):
+        """卸载选中的WIM映像不保存更改"""
+        self.unmount_selected_wim(commit=False)
+
+    def unmount_selected_wim(self, commit: bool = True):
+        """卸载选中的WIM映像
+
+        Args:
+            commit: 是否保存更改
+        """
+        try:
+            # 使用共享功能获取选中的WIM文件
+            wim_file = self.wim_ops_common.get_selected_wim_info(self.main_window.builds_list)
+            if not wim_file:
+                self.wim_ops_common.show_warning("提示", "请先选择要卸载的WIM映像文件")
+                return
+
+            # 创建UnifiedWIMManager实例
+            from core.unified_manager import UnifiedWIMManager
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.main_window)
+
+            # 使用共享功能执行卸载操作
+            self.wim_ops_common.unmount_wim_with_progress(wim_file, wim_manager, commit)
+
+        except Exception as e:
+            log_error(e, "卸载选中的WIM映像")
+            self.wim_ops_common.show_critical("操作失败", f"卸载操作时发生错误: {str(e)}")
