@@ -56,10 +56,11 @@ class MountThread(QThread):
             # 阶段3: 检查挂载状态 (25%)
             logger.info(f"开始挂载操作，WIM文件: {self.wim_file_path}")
 
-            # 使用新的挂载目录逻辑：WIM文件所在目录 + /mount
-            wim_file_path = Path(self.wim_file_path)
-            mount_dir = wim_file_path.parent / "mount"
-            logger.info(f"检查挂载目录: {mount_dir}")
+            # 使用统一的挂载目录逻辑：使用UnifiedWIMManager提供的路径管理
+            from core.unified_manager import UnifiedWIMManager
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+            mount_dir = wim_manager.get_mount_dir(self.build_dir)
+            logger.info(f"使用统一挂载目录: {mount_dir}")
 
             # 检查是否已经挂载
             if mount_dir.exists() and list(mount_dir.iterdir()):
@@ -192,10 +193,11 @@ class UnmountThread(QThread):
             
             # 阶段3: 检查挂载状态 (25%)
             logger.info("检查挂载状态")
-            # 使用新的挂载目录逻辑：WIM文件所在目录 + /mount
-            wim_file_path = Path(self.wim_file_path)
-            mount_dir = wim_file_path.parent / "mount"
-            logger.info(f"检查挂载目录: {mount_dir}")
+            # 使用统一的挂载目录逻辑：使用UnifiedWIMManager提供的路径管理
+            from core.unified_manager import UnifiedWIMManager
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+            mount_dir = wim_manager.get_mount_dir(self.build_dir)
+            logger.info(f"使用统一挂载目录: {mount_dir}")
 
             if not mount_dir.exists():
                 logger.warning("挂载目录不存在，无需卸载")
