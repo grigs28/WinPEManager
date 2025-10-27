@@ -8,13 +8,24 @@ WIM操作通用功能模块
 import ctypes
 import platform
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from PyQt5.QtWidgets import QMessageBox, QProgressDialog, QApplication
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QObject, pyqtSignal
 
 from utils.logger import log_error
+
+
+class WIMSignals(QObject):
+    """WIM操作信号类"""
+    # 定义信号
+    progress_update = pyqtSignal(int, str)  # 进度值, 状态文本
+    operation_finished = pyqtSignal(bool, str)  # 是否成功, 消息
+    operation_error = pyqtSignal(str)  # 错误消息
+    show_message = pyqtSignal(str, str, str)  # 标题, 消息, 类型 (info/warning/error/critical)
 
 
 class WIMOperationsCommon:
@@ -420,86 +431,30 @@ class WIMOperationsCommon:
                 )
                 return success
 
-            # 创建进度对话框
-            progress_dialog = QProgressDialog("正在挂载WIM映像...", "取消", 0, 100, self.parent)
-            progress_dialog.setWindowTitle("挂载WIM映像")
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.show()
-            QApplication.processEvents()
-
-            # 添加日志消息
+            # 在主线程中直接执行操作，避免线程安全问题
             self.log_message(f"开始挂载WIM映像: {wim_file['name']}")
 
-            # 在后台线程中执行挂载操作
-            def mount_operation():
-                try:
-                    return wim_manager.mount_wim(wim_file["build_dir"], wim_file["path"])
-                except Exception as e:
-                    log_error(e, "挂载WIM映像")
-                    return False, f"挂载失败: {str(e)}"
+            # 直接调用挂载操作
+            success, message = wim_manager.mount_wim(wim_file["build_dir"], wim_file["path"])
 
-            # 使用线程实现异步操作，确保进度条正确更新
-            import threading
-            import time
+            if success:
+                self.log_message(f"挂载成功: {message}")
+                self.show_info("操作成功", f"挂载成功:\n{message}")
+            else:
+                self.log_message(f"挂载失败: {message}")
+                self.show_critical("操作失败", f"挂载失败:\n{message}")
 
-            def execute_mount():
-                try:
-                    # 模拟挂载过程的进度更新
-                    progress_dialog.setValue(10)
-                    progress_dialog.setLabelText("正在检查挂载条件...")
-                    QApplication.processEvents()
-                    time.sleep(0.1)
+            # 触发刷新
+            self.trigger_refresh()
 
-                    success, message = mount_operation()
-
-                    if success:
-                        progress_dialog.setValue(80)
-                        progress_dialog.setLabelText("正在完成挂载操作...")
-                        QApplication.processEvents()
-                        time.sleep(0.1)
-
-                        progress_dialog.setValue(100)
-                        progress_dialog.setLabelText("挂载完成")
-                        QApplication.processEvents()
-
-                        self.log_message(f"挂载成功: {message}")
-                        self.show_info("操作成功", f"挂载成功:\n{message}")
-                    else:
-                        progress_dialog.setValue(100)
-                        progress_dialog.setLabelText("挂载失败")
-                        QApplication.processEvents()
-
-                        self.log_message(f"挂载失败: {message}")
-                        self.show_critical("操作失败", f"挂载失败:\n{message}")
-
-                    # 触发刷新
-                    self.trigger_refresh()
-
-                    if on_finished:
-                        on_finished(success, message)
-
-                except Exception as e:
-                    progress_dialog.setValue(100)
-                    progress_dialog.setLabelText("操作失败")
-                    QApplication.processEvents()
-
-                    log_error(e, "执行挂载操作")
-                    self.show_critical("操作失败", f"挂载操作时发生错误: {str(e)}")
-                    if on_finished:
-                        on_finished(False, str(e))
-                finally:
-                    time.sleep(0.5)  # 给用户时间看到完成状态
-                    progress_dialog.close()
-
-            # 在新线程中执行挂载操作
-            mount_thread = threading.Thread(target=execute_mount, daemon=True)
-            mount_thread.start()
+            if on_finished:
+                on_finished(success, message)
 
             return True
 
         except Exception as e:
-            log_error(e, "准备挂载操作")
-            self.show_critical("操作失败", f"准备挂载操作时发生错误: {str(e)}")
+            log_error(e, "挂载WIM映像")
+            self.show_critical("操作失败", f"挂载操作时发生错误: {str(e)}")
             return False
 
     def unmount_wim_with_progress(self, wim_file: Dict, wim_manager, commit: bool = True, on_finished=None) -> bool:
@@ -532,85 +487,29 @@ class WIMOperationsCommon:
                 )
                 return success
 
-            # 创建进度对话框
+            # 在主线程中直接执行操作，避免线程安全问题
             operation_name = "卸载并保存" if commit else "卸载不保存"
-            progress_dialog = QProgressDialog(f"正在{operation_name}WIM映像...", "取消", 0, 100, self.parent)
-            progress_dialog.setWindowTitle(operation_name)
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.show()
-            QApplication.processEvents()
-
-            # 添加日志消息
             self.log_message(f"开始{operation_name}WIM映像: {wim_file['name']}")
 
-            # 在后台线程中执行卸载操作
-            def unmount_operation():
-                try:
-                    return wim_manager.unmount_wim(wim_file["build_dir"], commit)
-                except Exception as e:
-                    log_error(e, "卸载WIM映像")
-                    return False, f"卸载失败: {str(e)}"
+            # 直接调用卸载操作
+            success, message = wim_manager.unmount_wim(wim_file["build_dir"], commit)
 
-            # 使用线程实现异步操作，确保进度条正确更新
-            import threading
-            import time
+            if success:
+                self.log_message(f"{operation_name}成功: {message}")
+                self.show_info("操作成功", f"{operation_name}成功:\n{message}")
+            else:
+                self.log_message(f"{operation_name}失败: {message}")
+                self.show_critical("操作失败", f"{operation_name}失败:\n{message}")
 
-            def execute_unmount():
-                try:
-                    # 模拟卸载过程的进度更新
-                    progress_dialog.setValue(10)
-                    progress_dialog.setLabelText("正在检查卸载条件...")
-                    QApplication.processEvents()
-                    time.sleep(0.1)
+            # 触发刷新
+            self.trigger_refresh()
 
-                    success, message = unmount_operation()
-
-                    if success:
-                        progress_dialog.setValue(80)
-                        progress_dialog.setLabelText(f"正在完成{operation_name}操作...")
-                        QApplication.processEvents()
-                        time.sleep(0.1)
-
-                        progress_dialog.setValue(100)
-                        progress_dialog.setLabelText(f"{operation_name}完成")
-                        QApplication.processEvents()
-
-                        self.log_message(f"{operation_name}成功: {message}")
-                        self.show_info("操作成功", f"{operation_name}成功:\n{message}")
-                    else:
-                        progress_dialog.setValue(100)
-                        progress_dialog.setLabelText(f"{operation_name}失败")
-                        QApplication.processEvents()
-
-                        self.log_message(f"{operation_name}失败: {message}")
-                        self.show_critical("操作失败", f"{operation_name}失败:\n{message}")
-
-                    # 触发刷新
-                    self.trigger_refresh()
-
-                    if on_finished:
-                        on_finished(success, message)
-
-                except Exception as e:
-                    progress_dialog.setValue(100)
-                    progress_dialog.setLabelText("操作失败")
-                    QApplication.processEvents()
-
-                    log_error(e, "执行卸载操作")
-                    self.show_critical("操作失败", f"{operation_name}操作时发生错误: {str(e)}")
-                    if on_finished:
-                        on_finished(False, str(e))
-                finally:
-                    time.sleep(0.5)  # 给用户时间看到完成状态
-                    progress_dialog.close()
-
-            # 在新线程中执行卸载操作
-            unmount_thread = threading.Thread(target=execute_unmount, daemon=True)
-            unmount_thread.start()
+            if on_finished:
+                on_finished(success, message)
 
             return True
 
         except Exception as e:
-            log_error(e, "准备卸载操作")
-            self.show_critical("操作失败", f"准备卸载操作时发生错误: {str(e)}")
+            log_error(e, "卸载WIM映像")
+            self.show_critical("操作失败", f"卸载操作时发生错误: {str(e)}")
             return False

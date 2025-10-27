@@ -33,6 +33,9 @@ class WIMOperations:
         # 初始化共享的WIM操作功能
         self.wim_ops_common = WIMOperationsCommon(dialog, self.config_manager, self.adk_manager)
 
+        # 创建信号实例
+        self.signals = WIMSignals()
+
         # 设置刷新回调，用于操作完成后刷新WIM管理器列表
         self.wim_ops_common.add_refresh_callback(dialog.refresh_wim_list)
 
