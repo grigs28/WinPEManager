@@ -163,6 +163,51 @@ class PathManager:
             mount_dir = self.get_mount_dir(build_dir)
             if not mount_dir.exists():
                 return False
-            return bool(list(mount_dir.iterdir()))
+            
+            # 检查挂载目录是否为空
+            if not list(mount_dir.iterdir()):
+                return False
+            
+            # 检查是否有挂载信息文件或标记
+            mount_info_file = mount_dir / ".mount_info"
+            if mount_info_file.exists():
+                try:
+                    with open(mount_info_file, 'r', encoding='utf-8') as f:
+                        mount_info = f.read().strip()
+                        # 检查是否是当前WIM文件的挂载信息
+                        if str(wim_path) in mount_info:
+                            return True
+                except Exception:
+                    pass
+            
+            # 检查WIM文件特定的挂载标记文件
+            wim_name = wim_path.stem
+            mount_marker_file = mount_dir / f".{wim_name}_mounted"
+            if mount_marker_file.exists():
+                self.logger.debug(f"找到WIM文件 {wim_name} 的挂载标记文件")
+                return True
+            
+            # 如果没有挂载信息文件，检查是否只有一个WIM文件被挂载
+            # 这种情况下，假设挂载目录中的内容属于当前WIM文件
+            wim_files_in_build = list(build_dir.rglob("*.wim"))
+            if len(wim_files_in_build) == 1:
+                # 检查唯一的WIM文件是否是当前文件
+                only_wim = wim_files_in_build[0]
+                if only_wim == wim_path:
+                    return True
+                else:
+                    return False
+            
+            # 如果有多个WIM文件，需要更精确的检查
+            # 检查挂载目录中是否有当前WIM文件对应的标记
+            wim_name = wim_path.stem
+            for item in mount_dir.iterdir():
+                if item.is_file() and item.name.startswith(f".{wim_name}_mounted"):
+                    return True
+            
+            # 如果没有找到特定标记，使用简单的目录存在性检查
+            # 但这种情况下不能确定是哪个WIM文件挂载的
+            return False
+            
         except Exception:
             return False

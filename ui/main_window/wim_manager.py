@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 WIM映像管理模块
-提供WIM映像的挂载、卸载、USB启动盘制作功能
+基于UnifiedWIMManager重建的WIM管理功能
 """
 
 import os
@@ -15,257 +15,203 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from PyQt5.QtWidgets import (
     QMessageBox, QProgressDialog, QFileDialog, QListWidget, QListWidgetItem,
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGroupBox, QComboBox, QDialog
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGroupBox, QComboBox, QDialog,
+    QTextEdit, QSplitter
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFont
 
 from ui.button_styler import apply_3d_button_style, apply_3d_button_style_alternate, apply_3d_button_style_red
 from utils.logger import log_error
 
 
-class MountThread(QThread):
-    """WIM挂载线程"""
+class WIMOperationThread(QThread):
+    """WIM操作线程 - 统一处理所有WIM操作"""
 
     progress_signal = pyqtSignal(int)
+    log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, config_manager, adk_manager, parent, build_dir, wim_file_path=None):
+    def __init__(self, config_manager, adk_manager, parent, operation: str, build_dir: Path, **kwargs):
         super().__init__()
         self.config_manager = config_manager
         self.adk_manager = adk_manager
         self.parent = parent
+        self.operation = operation
         self.build_dir = build_dir
-        self.wim_file_path = wim_file_path
+        self.kwargs = kwargs
         self._is_running = True
     
     def run(self):
-        """执行挂载操作"""
+        """执行WIM操作"""
         try:
-            # 阶段1: 初始化和准备 (5%)
-            self.progress_signal.emit(5)
-            
-            # 阶段2: 创建统一WIM管理器 (15%)
             from core.unified_manager import UnifiedWIMManager
             from utils.logger import get_logger
+            
+            logger = get_logger("WIMOperationThread")
+            logger.info(f"开始执行WIM操作: {self.operation}")
+            
+            # 创建统一WIM管理器
+            self.progress_signal.emit(10)
             wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
-            logger = get_logger("WIMManager")
-            self.progress_signal.emit(15)
+            self.progress_signal.emit(20)
             
-            # 阶段3: 检查挂载状态 (25%)
-            logger.info(f"开始挂载操作，WIM文件: {self.wim_file_path}")
-
-            # 使用统一的挂载目录逻辑：使用UnifiedWIMManager提供的路径管理
-            from core.unified_manager import UnifiedWIMManager
-            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
-            mount_dir = wim_manager.get_mount_dir(self.build_dir)
-            logger.info(f"使用统一挂载目录: {mount_dir}")
-
-            # 检查是否已经挂载
-            if mount_dir.exists() and list(mount_dir.iterdir()):
-                logger.warning("WIM文件已经挂载，无需重复挂载")
-                self.progress_signal.emit(100)
-                self.finished_signal.emit(False, "WIM文件已经挂载，无需重复挂载")
-                return
-
-            self.progress_signal.emit(25)
-
-            # 阶段4: 准备挂载环境 (35%)
-            logger.info("准备挂载环境")
-            if not mount_dir.exists():
-                mount_dir.mkdir(parents=True, exist_ok=True)
-            self.progress_signal.emit(35)
-            
-            # 阶段5: 执行挂载操作 (35%-85%)
-            logger.info("开始执行DISM挂载命令")
-            self.progress_signal.emit(45)
-
-            # 添加超时机制和更详细的日志
-            import threading
-            import time
-            import queue
-            
-            # 使用队列安全的方式执行挂载操作
-            result_queue = queue.Queue()
-            
-            def mount_operation():
-                try:
-                    logger.info("开始调用wim_manager.mount_wim()")
-                    success, message = wim_manager.mount_wim(self.build_dir, Path(self.wim_file_path))
-                    logger.info(f"wim_manager.mount_wim() 返回: success={success}, message='{message}'")
-                    result_queue.put((success, message))
-                except Exception as e:
-                    error_msg = f"挂载操作异常: {str(e)}"
-                    logger.error(error_msg)
-                    import traceback
-                    logger.error(f"异常堆栈: {traceback.format_exc()}")
-                    result_queue.put((False, error_msg))
-            
-            # 启动挂载操作线程
-            mount_thread = threading.Thread(target=mount_operation)
-            mount_thread.daemon = True
-            mount_thread.start()
-            
-            # 等待最多30秒
-            try:
-                success, message = result_queue.get(timeout=30)
-                logger.info(f"从线程获得结果: success={success}, message='{message}'")
-            except queue.Empty:
-                logger.error("挂载操作超时，强制终止")
-                self.progress_signal.emit(100)
-                self.error_signal.emit("挂载操作超时，请检查系统资源或WIM文件完整性")
-                return
-            
-            # 阶段6: 验证挂载结果 (85%)
-            self.progress_signal.emit(85)
-            logger.info("验证挂载结果")
-            
-            if success:
-                # 验证挂载是否成功
-                if mount_dir.exists() and list(mount_dir.iterdir()):
-                    logger.info("挂载验证成功")
-                    self.progress_signal.emit(95)
-                else:
-                    logger.warning("挂载验证失败，目录为空")
-                    success = False
-                    message = "挂载验证失败，挂载目录为空"
+            # 根据操作类型执行相应的方法
+            if self.operation == "mount":
+                success, message = self._mount_operation(wim_manager, logger)
+            elif self.operation == "unmount":
+                success, message = self._unmount_operation(wim_manager, logger)
+            elif self.operation == "create_iso":
+                success, message = self._create_iso_operation(wim_manager, logger)
+            elif self.operation == "create_usb":
+                success, message = self._create_usb_operation(wim_manager, logger)
+            elif self.operation == "smart_cleanup":
+                success, message = self._smart_cleanup_operation(wim_manager, logger)
             else:
-                logger.error(f"挂载操作失败: {message}")
-            
-            # 阶段7: 完成 (95%-100%)
-            self.progress_signal.emit(95)
-            
-            # 短暂延迟确保用户能看到完成进度
-            import time
-            time.sleep(0.3)
+                success, message = False, f"不支持的操作类型: {self.operation}"
             
             self.progress_signal.emit(100)
-            logger.info("挂载操作完成")
             self.finished_signal.emit(success, message)
             
         except Exception as e:
-            logger = get_logger("WIMManager")
-            logger.error(f"挂载过程中发生异常: {str(e)}")
+            logger = get_logger("WIMOperationThread")
+            logger.error(f"WIM操作异常: {str(e)}")
             import traceback
             logger.error(f"异常堆栈: {traceback.format_exc()}")
-            self.error_signal.emit(f"挂载过程中发生错误: {str(e)}")
+            self.error_signal.emit(f"WIM操作过程中发生错误: {str(e)}")
+    
+    def _mount_operation(self, wim_manager, logger) -> Tuple[bool, str]:
+        """挂载操作"""
+        self.progress_signal.emit(30)
+        self.log_signal.emit("检查挂载前条件...")
+        
+        # 执行挂载前检查
+        wim_file_path = self.kwargs.get("wim_file_path")
+        if not wim_file_path:
+            # 获取主要WIM文件
+            wim_file_path = wim_manager.get_primary_wim(self.build_dir)
+            if not wim_file_path:
+                return False, "未找到WIM文件"
+        
+        self.progress_signal.emit(40)
+        self.log_signal.emit(f"开始挂载WIM文件: {wim_file_path.name}")
+        
+        # 执行挂载
+        self.progress_signal.emit(60)
+        success, message = wim_manager.mount_wim(self.build_dir, wim_file_path)
+        
+        self.progress_signal.emit(80)
+        self.log_signal.emit("验证挂载结果...")
+        
+        return success, message
+    
+    def _unmount_operation(self, wim_manager, logger) -> Tuple[bool, str]:
+        """卸载操作"""
+        self.progress_signal.emit(30)
+        self.log_signal.emit("检查卸载前条件...")
+        
+        # 执行卸载前检查
+        success, message = wim_manager.pre_unmount_checks(self.build_dir)
+        if not success:
+            return False, message
+        
+        self.progress_signal.emit(40)
+        commit = self.kwargs.get("commit", True)
+        action_text = "保存更改并" if commit else "放弃更改并"
+        self.log_signal.emit(f"开始{action_text}卸载...")
+        
+        # 执行卸载
+        self.progress_signal.emit(60)
+        success, message = wim_manager.unmount_wim(self.build_dir, commit=commit)
+        
+        self.progress_signal.emit(80)
+        self.log_signal.emit("验证卸载结果...")
+        
+        return success, message
+    
+    def _create_iso_operation(self, wim_manager, logger) -> Tuple[bool, str]:
+        """ISO创建操作"""
+        self.progress_signal.emit(30)
+        self.log_signal.emit("检查ISO创建前条件...")
+        
+        # 执行ISO创建前检查
+        success, message = wim_manager.pre_iso_checks(self.build_dir)
+        if not success:
+            return False, message
+        
+        self.progress_signal.emit(40)
+        iso_path = self.kwargs.get("iso_path")
+        if not iso_path:
+            return False, "未指定ISO输出路径"
+        
+        self.log_signal.emit(f"开始创建ISO文件: {Path(iso_path).name}")
+        
+        # 自动卸载已挂载的镜像
+        self.progress_signal.emit(50)
+        self.log_signal.emit("检查并自动卸载已挂载的镜像...")
+        auto_success, auto_message = wim_manager.auto_unmount_before_iso(self.build_dir)
+        if not auto_success:
+            self.log_signal.emit(f"自动卸载警告: {auto_message}")
+        
+        # 创建ISO
+        self.progress_signal.emit(70)
+        success, message = wim_manager.create_iso(self.build_dir, Path(iso_path))
+        
+        self.progress_signal.emit(80)
+        self.log_signal.emit("验证ISO创建结果...")
+        
+        return success, message
+    
+    def _create_usb_operation(self, wim_manager, logger) -> Tuple[bool, str]:
+        """USB创建操作"""
+        self.progress_signal.emit(30)
+        self.log_signal.emit("检查USB创建前条件...")
+        
+        usb_path = self.kwargs.get("usb_path")
+        if not usb_path:
+            return False, "未指定USB设备路径"
+        
+        # 执行USB创建前检查
+        success, message = wim_manager.pre_usb_checks(self.build_dir, Path(usb_path))
+        if not success:
+            return False, message
+        
+        self.progress_signal.emit(40)
+        self.log_signal.emit(f"开始制作USB启动盘: {Path(usb_path).name}")
+        
+        # 创建USB
+        self.progress_signal.emit(70)
+        success, message = wim_manager.create_usb(self.build_dir, Path(usb_path))
+        
+        self.progress_signal.emit(80)
+        self.log_signal.emit("验证USB创建结果...")
+        
+        return success, message
+    
+    def _smart_cleanup_operation(self, wim_manager, logger) -> Tuple[bool, str]:
+        """智能清理操作"""
+        self.progress_signal.emit(30)
+        self.log_signal.emit("开始智能清理...")
+        
+        # 执行智能清理
+        self.progress_signal.emit(60)
+        cleanup_result = wim_manager.smart_cleanup(self.build_dir)
+        
+        self.progress_signal.emit(80)
+        self.log_signal.emit("验证清理结果...")
+        
+        if cleanup_result.get("success", False):
+            actions = cleanup_result.get("actions_taken", [])
+            message = f"智能清理完成，执行了 {len(actions)} 个操作"
+            if cleanup_result.get("warnings"):
+                message += f"，有 {len(cleanup_result['warnings'])} 个警告"
+            return True, message
+        else:
+            return False, "智能清理失败"
     
     def stop(self):
-        """停止挂载操作"""
-        self._is_running = False
-
-
-class UnmountThread(QThread):
-    """WIM卸载线程"""
-
-    progress_signal = pyqtSignal(int)
-    finished_signal = pyqtSignal(bool, str)
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, config_manager, adk_manager, parent, build_dir, wim_file_path, commit=True):
-        super().__init__()
-        self.config_manager = config_manager
-        self.adk_manager = adk_manager
-        self.parent = parent
-        self.build_dir = build_dir
-        self.wim_file_path = wim_file_path
-        self.commit = commit
-        self._is_running = True
-    
-    def run(self):
-        """执行卸载操作"""
-        try:
-            # 添加日志输出
-            from utils.logger import get_logger
-            logger = get_logger("WIMManager")
-            logger.info(f"开始卸载操作，构建目录: {self.build_dir}")
-            logger.info(f"卸载模式: {'保存更改' if self.commit else '放弃更改'}")
-            
-            # 阶段1: 初始化和准备 (5%)
-            self.progress_signal.emit(5)
-            
-            # 阶段2: 创建统一WIM管理器 (15%)
-            from core.unified_manager import UnifiedWIMManager
-            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
-            logger.info("UnifiedWIMManager 创建完成")
-            self.progress_signal.emit(15)
-            
-            # 阶段3: 检查挂载状态 (25%)
-            logger.info("检查挂载状态")
-            # 使用统一的挂载目录逻辑：使用UnifiedWIMManager提供的路径管理
-            from core.unified_manager import UnifiedWIMManager
-            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
-            mount_dir = wim_manager.get_mount_dir(self.build_dir)
-            logger.info(f"使用统一挂载目录: {mount_dir}")
-
-            if not mount_dir.exists():
-                logger.warning("挂载目录不存在，无需卸载")
-                self.progress_signal.emit(100)
-                self.finished_signal.emit(False, "挂载目录不存在，无需卸载")
-                return
-
-            if not list(mount_dir.iterdir()):
-                logger.warning("挂载目录为空，可能已经卸载")
-                self.progress_signal.emit(100)
-                self.finished_signal.emit(False, "挂载目录为空，可能已经卸载")
-                return
-            
-            self.progress_signal.emit(25)
-            
-            # 阶段4: 准备卸载环境 (35%)
-            logger.info("准备卸载环境")
-            action_text = "保存更改并卸载" if self.commit else "放弃更改并卸载"
-            logger.info(f"卸载模式: {action_text}")
-            self.progress_signal.emit(35)
-            
-            # 阶段5: 执行卸载操作 (35%-85%)
-            logger.info("开始执行DISM卸载命令")
-            self.progress_signal.emit(45)
-            
-            success, message = wim_manager.unmount_wim(self.build_dir, commit=self.commit)
-            logger.info(f"unmount_winpe_image 返回结果: success={success}, message={message}")
-            
-            # 阶段6: 验证卸载结果 (85%)
-            self.progress_signal.emit(85)
-            logger.info("验证卸载结果")
-            
-            if success:
-                # 验证卸载是否成功
-                if mount_dir.exists() and not list(mount_dir.iterdir()):
-                    logger.info("卸载验证成功，目录已清空")
-                    self.progress_signal.emit(95)
-                elif not mount_dir.exists():
-                    logger.info("卸载验证成功，挂载目录已删除")
-                    self.progress_signal.emit(95)
-                else:
-                    logger.warning("卸载验证失败，目录仍然不为空")
-                    success = False
-                    message = "卸载验证失败，目录仍然不为空"
-            else:
-                logger.error(f"卸载操作失败: {message}")
-            
-            # 阶段7: 完成 (95%-100%)
-            self.progress_signal.emit(95)
-            
-            # 短暂延迟确保用户能看到完成进度
-            import time
-            time.sleep(0.3)
-            
-            self.progress_signal.emit(100)
-            logger.info("卸载操作完成")
-            self.finished_signal.emit(success, message)
-            
-        except Exception as e:
-            from utils.logger import get_logger
-            logger = get_logger("WIMManager")
-            logger.error(f"卸载过程中发生异常: {str(e)}")
-            import traceback
-            logger.error(f"异常堆栈: {traceback.format_exc()}")
-            self.error_signal.emit(f"卸载过程中发生错误: {str(e)}")
-    
-    def stop(self):
-        """停止卸载操作"""
+        """停止操作"""
         self._is_running = False
 
 
@@ -295,7 +241,7 @@ class WIMManager:
 
 
 class WIMManagerDialog(QDialog):
-    """WIM映像管理对话框"""
+    """WIM映像管理对话框 - 基于UnifiedWIMManager重建"""
     
     def __init__(self, parent, config_manager, adk_manager):
         super().__init__(parent)
@@ -303,92 +249,118 @@ class WIMManagerDialog(QDialog):
         self.config_manager = config_manager
         self.adk_manager = adk_manager
         
+        # 创建统一WIM管理器
+        self.wim_manager = None
+        
         self.setWindowTitle("WIM映像管理")
         self.setModal(True)
-        self.resize(800, 600)
+        self.resize(1000, 800)
         
         # 创建主布局
         main_layout = QVBoxLayout()
+        
+        # 创建工具栏
+        toolbar_layout = QHBoxLayout()
+        
+        # 刷新按钮
+        refresh_btn = QPushButton("刷新列表")
+        refresh_btn.setMinimumHeight(35)
+        apply_3d_button_style(refresh_btn)
+        refresh_btn.clicked.connect(self.refresh_wim_list)
+        
+        # 诊断按钮
+        diagnose_btn = QPushButton("诊断信息")
+        diagnose_btn.setMinimumHeight(35)
+        apply_3d_button_style_alternate(diagnose_btn)
+        diagnose_btn.clicked.connect(self.show_diagnostics)
+        
+        # 智能清理按钮
+        cleanup_btn = QPushButton("智能清理")
+        cleanup_btn.setMinimumHeight(35)
+        apply_3d_button_style_red(cleanup_btn)
+        cleanup_btn.clicked.connect(self.smart_cleanup)
+        
+        # 清空日志按钮
+        clear_log_btn = QPushButton("清空日志")
+        clear_log_btn.setMinimumHeight(35)
+        apply_3d_button_style_alternate(clear_log_btn)
+        clear_log_btn.clicked.connect(self.clear_log)
+        
+        toolbar_layout.addWidget(refresh_btn)
+        toolbar_layout.addWidget(diagnose_btn)
+        toolbar_layout.addWidget(cleanup_btn)
+        toolbar_layout.addWidget(clear_log_btn)
+        toolbar_layout.addStretch()
         
         # 创建WIM操作区域
         wim_group = QGroupBox("WIM映像操作")
         wim_layout = QVBoxLayout()
         
+        # 第一行操作按钮
+        row1_layout = QHBoxLayout()
+        
         # 挂载WIM映像
-        mount_layout = QHBoxLayout()
         mount_btn = QPushButton("挂载WIM映像")
         mount_btn.setMinimumHeight(40)
         apply_3d_button_style(mount_btn)
         mount_btn.clicked.connect(self.mount_wim_image)
         
-        mount_info = QLabel("挂载选中的WIM映像到挂载目录进行修改")
-        mount_info.setWordWrap(True)
-        mount_info.setStyleSheet("color: #666; font-size: 12px; margin: 5px;")
-        
-        mount_layout.addWidget(mount_btn)
-        mount_layout.addWidget(mount_info)
-        mount_layout.addStretch()
-        
         # 卸载保存
-        unmount_commit_layout = QHBoxLayout()
         unmount_commit_btn = QPushButton("卸载并保存")
         unmount_commit_btn.setMinimumHeight(40)
         apply_3d_button_style_alternate(unmount_commit_btn)
         unmount_commit_btn.clicked.connect(self.unmount_wim_commit)
         
-        unmount_commit_info = QLabel("卸载WIM映像并保存所有更改")
-        unmount_commit_info.setWordWrap(True)
-        unmount_commit_info.setStyleSheet("color: #666; font-size: 12px; margin: 5px;")
-        
-        unmount_commit_layout.addWidget(unmount_commit_btn)
-        unmount_commit_layout.addWidget(unmount_commit_info)
-        unmount_commit_layout.addStretch()
-        
         # 卸载不保存
-        unmount_discard_layout = QHBoxLayout()
         unmount_discard_btn = QPushButton("卸载不保存")
         unmount_discard_btn.setMinimumHeight(40)
         apply_3d_button_style_red(unmount_discard_btn)
         unmount_discard_btn.clicked.connect(self.unmount_wim_discard)
         
-        unmount_discard_info = QLabel("卸载WIM映像并放弃所有更改")
-        unmount_discard_info.setWordWrap(True)
-        unmount_discard_info.setStyleSheet("color: #666; font-size: 12px; margin: 5px;")
+        row1_layout.addWidget(mount_btn)
+        row1_layout.addWidget(unmount_commit_btn)
+        row1_layout.addWidget(unmount_discard_btn)
         
-        unmount_discard_layout.addWidget(unmount_discard_btn)
-        unmount_discard_layout.addWidget(unmount_discard_info)
-        unmount_discard_layout.addStretch()
+        # 第二行操作按钮
+        row2_layout = QHBoxLayout()
         
-        # USB启动盘制作
-        usb_layout = QHBoxLayout()
+        # 创建ISO
+        iso_btn = QPushButton("创建ISO")
+        iso_btn.setMinimumHeight(40)
+        apply_3d_button_style(iso_btn)
+        iso_btn.clicked.connect(self.create_iso)
+        
+        # 制作USB启动盘
         usb_btn = QPushButton("制作USB启动盘")
         usb_btn.setMinimumHeight(40)
         apply_3d_button_style(usb_btn)
         usb_btn.clicked.connect(self.create_usb_bootable)
         
-        usb_info = QLabel("制作可启动的USB驱动器")
-        usb_info.setWordWrap(True)
-        usb_info.setStyleSheet("color: #666; font-size: 12px; margin: 5px;")
+        # 快速检查
+        check_btn = QPushButton("快速检查")
+        check_btn.setMinimumHeight(40)
+        apply_3d_button_style_alternate(check_btn)
+        check_btn.clicked.connect(self.quick_check)
         
-        usb_layout.addWidget(usb_btn)
-        usb_layout.addWidget(usb_info)
-        usb_layout.addStretch()
+        row2_layout.addWidget(iso_btn)
+        row2_layout.addWidget(usb_btn)
+        row2_layout.addWidget(check_btn)
         
-        # 添加到WIM布局
-        wim_layout.addLayout(mount_layout)
-        wim_layout.addLayout(unmount_commit_layout)
-        wim_layout.addLayout(unmount_discard_layout)
-        wim_layout.addLayout(usb_layout)
-        
+        wim_layout.addLayout(row1_layout)
+        wim_layout.addLayout(row2_layout)
         wim_group.setLayout(wim_layout)
         
+        # 创建分割器
+        splitter = QSplitter(Qt.Vertical)
+        
         # 创建状态显示区域
-        status_group = QGroupBox("当前状态")
+        status_group = QGroupBox("WIM映像列表")
         status_layout = QVBoxLayout()
         
         # WIM映像列表
         self.wim_list = QListWidget()
-        self.wim_list.setMinimumHeight(200)
+        self.wim_list.setMinimumHeight(250)
+        self.wim_list.setMaximumHeight(300)
         self.wim_list.setStyleSheet("""
             QListWidget {
                 font-family: 'Microsoft YaHei UI', 'SimHei';
@@ -422,9 +394,32 @@ class WIMManagerDialog(QDialog):
         
         status_group.setLayout(status_layout)
         
+        # 创建日志显示区域
+        log_group = QGroupBox("操作日志")
+        log_layout = QVBoxLayout()
+        
+        # 日志文本框 - 使用与系统日志相同的字体和样式
+        self.log_text = QTextEdit()
+        self.log_text.setMinimumHeight(200)
+        self.log_text.setMaximumHeight(250)
+        self.log_text.setReadOnly(True)
+        self.log_text.setFont(QFont("Consolas", 9))
+        # 移除自定义样式，使用与系统日志一致的默认样式
+        
+        log_layout.addWidget(QLabel("WIM操作日志信息:"))
+        log_layout.addWidget(self.log_text)
+        
+        log_group.setLayout(log_layout)
+        
+        # 添加到分割器
+        splitter.addWidget(status_group)
+        splitter.addWidget(log_group)
+        splitter.setSizes([300, 200])
+        
         # 添加到主布局
+        main_layout.addLayout(toolbar_layout)
         main_layout.addWidget(wim_group)
-        main_layout.addWidget(status_group)
+        main_layout.addWidget(splitter)
         
         # 添加按钮区域
         button_layout = QHBoxLayout()
@@ -433,135 +428,54 @@ class WIMManagerDialog(QDialog):
         close_btn.setMinimumHeight(40)
         close_btn.clicked.connect(self.reject)
         
-        refresh_btn = QPushButton("刷新列表")
-        refresh_btn.setMinimumHeight(40)
-        refresh_btn.clicked.connect(self.refresh_directories)
-        
         button_layout.addStretch()
-        button_layout.addWidget(refresh_btn)
         button_layout.addWidget(close_btn)
         
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
         
         # 初始化数据
-        self.refresh_directories()
+        self.init_wim_manager()
+        self.refresh_wim_list()
+        self.add_log_message("WIM管理器已初始化", "info")
     
-    def refresh_directories(self):
-        """递归扫描WinPE工作目录中的所有目录，列出所有WIM文件"""
+    def init_wim_manager(self):
+        """初始化统一WIM管理器"""
+        try:
+            from core.unified_manager import UnifiedWIMManager
+            self.wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+        except Exception as e:
+            log_error(e, "初始化统一WIM管理器")
+            QMessageBox.critical(self, "错误", f"初始化WIM管理器失败: {str(e)}")
+    
+    def refresh_wim_list(self):
+        """刷新WIM文件列表 - 使用UnifiedWIMManager"""
         try:
             self.wim_list.clear()
+            
+            if not self.wim_manager:
+                self.init_wim_manager()
+            
+            if not self.wim_manager:
+                self.wim_list.addItem("WIM管理器未初始化")
+                return
             
             # 获取工作空间路径
             workspace = Path(self.config_manager.get("output.workspace", ""))
             if not workspace.exists():
                 workspace = Path.cwd() / "workspace" / "WinPE_Build"
             
-            # 递归扫描所有目录中的WIM文件
+            # 使用UnifiedWIMManager查找所有WIM文件
             all_wim_files = []
             if workspace.exists():
-                all_wim_files = self.scan_wim_files_recursive(workspace)
+                all_wim_files = self.wim_manager.find_wim_files(workspace)
             
             # 按大小排序
             all_wim_files.sort(key=lambda x: x["size"], reverse=True)
             
             # 添加到列表
             for wim_file in all_wim_files:
-                size_mb = wim_file["size"] / (1024 * 1024)
-                size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
-                
-                status_text = "已挂载" if wim_file["mount_status"] else "未挂载"
-                
-                # 获取挂载位置 - 统一使用构建目录下的mount目录
-                if wim_file["mount_status"]:
-                    mount_dir = wim_file["build_dir"] / "mount"
-                    mount_path = str(mount_dir)
-                else:
-                    mount_path = "未挂载"
-
-                # 构建目录信息和相对路径
-                build_dir_name = wim_file["build_dir"].name
-                wim_relative_path = str(wim_file["path"]).replace(str(wim_file["build_dir"]), "").lstrip("\\/")
-
-                import datetime
-                ctime = wim_file["build_dir"].stat().st_ctime
-                time_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
-
-                # 为已挂载项添加图标
-                display_name = wim_file['name']
-                if wim_file["mount_status"] and not display_name.startswith("📂 "):
-                    display_name = f"📂 {display_name}"
-
-                item_text = f"{display_name} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {wim_relative_path}"
-
-                list_item = QListWidgetItem(item_text)
-                list_item.setData(Qt.UserRole, wim_file)
-                list_item.setToolTip(
-                    f"WIM文件: {wim_file['name']}\n"
-                    f"完整路径: {wim_file['path']}\n"
-                    f"相对路径: {wim_relative_path}\n"
-                    f"大小: {size_str}\n"
-                    f"类型: {wim_file['type'].upper()}\n"
-                    f"状态: {status_text}\n"
-                    f"构建目录: {build_dir_name} ({time_str})\n"
-                    f"挂载位置: {mount_path}"
-                )
-                
-                # 设置状态颜色和样式
-                if wim_file["mount_status"]:
-                    # 已挂载项使用更明显的绿色背景和深色文字
-                    list_item.setBackground(QColor("#E8F5E8"))
-                    list_item.setForeground(QColor("#2E7D32"))  # 深绿色文字
-
-                    # 设置自定义样式用于已挂载项
-                    custom_style = """
-                        QListWidget::item {
-                            background-color: #E8F5E8;
-                            border: 1px solid #4CAF50;
-                            font-weight: 500;
-                            padding: 8px;
-                            border-radius: 3px;
-                            margin: 1px;
-                        }
-                        QListWidget::item:selected {
-                            background-color: #2E7D32;
-                            color: white;
-                            border: 1px solid #1B5E20;
-                            font-weight: bold;
-                        }
-                    """
-                    list_item.setData(Qt.UserRole + 1, "mounted")
-                else:
-                    # 未挂载项使用默认样式
-                    list_item.setForeground(QColor("#333333"))  # 深灰色文字
-                    custom_style = """
-                        QListWidget::item {
-                            background-color: white;
-                            border: 1px solid #eee;
-                            font-weight: normal;
-                            padding: 8px;
-                            border-radius: 3px;
-                            margin: 1px;
-                        }
-                        QListWidget::item:selected {
-                            background-color: #0078d4;
-                            color: white;
-                            border: 1px solid #005a9e;
-                            font-weight: bold;
-                        }
-                    """
-                    list_item.setData(Qt.UserRole + 1, "unmounted")
-
-                self.wim_list.addItem(list_item)
-
-                # 应用自定义样式
-                if wim_file["mount_status"]:
-                    # 为已挂载项应用特殊样式
-                    row = self.wim_list.count() - 1
-                    item = self.wim_list.item(row)
-                    if item:
-                        item.setBackground(QColor("#E8F5E8"))
-                        item.setForeground(QColor("#2E7D32"))
+                self.add_wim_item(wim_file)
             
             if not all_wim_files:
                 self.wim_list.addItem("暂无WIM映像文件")
@@ -570,192 +484,67 @@ class WIMManagerDialog(QDialog):
             log_error(e, "刷新WIM文件列表")
             QMessageBox.critical(self, "错误", f"刷新WIM文件列表时发生错误: {str(e)}")
     
-    def scan_wim_files_recursive(self, root_dir: Path) -> List[Dict]:
-        """递归扫描目录中的所有WIM文件"""
-        wim_files = []
-
+    def add_wim_item(self, wim_file: Dict):
+        """添加WIM文件项到列表"""
         try:
-            # 首先获取所有构建目录（以WinPE_开头的目录）
-            build_dirs = []
-            for item in root_dir.iterdir():
-                if item.is_dir() and item.name.startswith("WinPE_"):
-                    build_dirs.append(item)
-
-            # 为每个构建目录扫描WIM文件
-            for build_dir in build_dirs:
-                wim_files.extend(self.scan_wim_files_in_build_dir(build_dir))
-
-            # 也扫描其他位置的WIM文件（比如旧的构建格式）
-            for item in root_dir.rglob("*"):
-                if item.is_file() and item.suffix.lower() == '.wim':
-                    # 检查是否已经在构建目录中处理过
-                    already_processed = False
-                    for wim_file in wim_files:
-                        if str(item) == str(wim_file["path"]):
-                            already_processed = True
-                            break
-
-                    if not already_processed:
-                        # 确定WIM文件类型
-                        wim_type = self.determine_wim_type(item)
-
-                        # 获取构建目录（WIM文件所在的上级目录）
-                        build_dir = self.find_build_dir_for_wim(item)
-
-                        if build_dir:
-                            wim_files.append({
-                                "path": item,
-                                "name": item.name,
-                                "type": wim_type,
-                                "size": item.stat().st_size,
-                                "mount_status": self.check_mount_status({"path": str(item)}),
-                                "build_dir": build_dir
-                            })
-                        else:
-                            # 如果找不到构建目录，使用文件所在目录
-                            wim_files.append({
-                                "path": item,
-                                "name": item.name,
-                                "type": wim_type,
-                                "size": item.stat().st_size,
-                                "mount_status": False,  # 默认未挂载
-                                "build_dir": item.parent
-                            })
-
-        except Exception as e:
-            log_error(e, f"递归扫描WIM文件: {root_dir}")
-
-        return wim_files
-
-    def scan_wim_files_in_build_dir(self, build_dir: Path) -> List[Dict]:
-        """扫描特定构建目录中的WIM文件"""
-        wim_files = []
-
-        try:
-            # 检查构建目录是否存在
-            if not build_dir.exists():
-                return wim_files
-
-            # 扫描boot.wim（在media/sources目录下）
-            boot_wim_path = build_dir / "media" / "sources" / "boot.wim"
-            if boot_wim_path.exists():
-                wim_files.append({
-                    "path": boot_wim_path,
-                    "name": boot_wim_path.name,
-                    "type": "copype",
-                    "size": boot_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status({"path": str(boot_wim_path)}),
-                    "build_dir": build_dir
-                })
-
-            # 扫描winpe.wim（在构建目录根目录下）
-            winpe_wim_path = build_dir / "winpe.wim"
-            if winpe_wim_path.exists():
-                wim_files.append({
-                    "path": winpe_wim_path,
-                    "name": winpe_wim_path.name,
-                    "type": "dism",
-                    "size": winpe_wim_path.stat().st_size,
-                    "mount_status": self.check_mount_status({"path": str(winpe_wim_path)}),
-                    "build_dir": build_dir
-                })
-
-            # 扫描其他WIM文件（递归搜索）
-            for item in build_dir.rglob("*.wim"):
-                # 跳过已经处理过的文件
-                if item.name.lower() in ["boot.wim", "winpe.wim"]:
-                    continue
-
-                # 确定WIM文件类型
-                wim_type = self.determine_wim_type(item)
-
-                wim_files.append({
-                    "path": item,
-                    "name": item.name,
-                    "type": wim_type,
-                    "size": item.stat().st_size,
-                    "mount_status": self.check_mount_status({"path": str(item)}),
-                    "build_dir": build_dir
-                })
-
-        except Exception as e:
-            log_error(e, f"扫描构建目录WIM文件: {build_dir}")
-
-        return wim_files
-    
-    def determine_wim_type(self, wim_path: Path) -> str:
-        """确定WIM文件类型"""
-        try:
-            # 根据文件名和路径判断类型
-            if wim_path.name.lower() == "boot.wim":
-                return "copype"
-            elif wim_path.name.lower() == "winpe.wim":
-                return "dism"
-            elif "sources" in str(wim_path).lower():
-                return "copype"
+            # 计算文件大小
+            size_mb = wim_file["size"] / (1024 * 1024)
+            size_str = f"{size_mb:.1f} MB" if size_mb >= 1 else f"{size_mb*1024:.0f} KB"
+            
+            # 状态文本
+            status_text = "已挂载" if wim_file["mount_status"] else "未挂载"
+            
+            # 构建目录信息
+            build_dir_name = wim_file["build_dir"].name
+            import datetime
+            ctime = wim_file["build_dir"].stat().st_ctime
+            time_str = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M')
+            
+            # WIM相对路径
+            wim_relative_path = str(wim_file["path"]).replace(str(wim_file["build_dir"]), "").lstrip("\\/")
+            
+            # 为已挂载项添加图标
+            display_name = wim_file['name']
+            if wim_file["mount_status"] and not display_name.startswith("📂 "):
+                display_name = f"📂 {display_name}"
+            
+            # 创建显示文本
+            item_text = f"{display_name} - {size_str} - {wim_file['type'].upper()} - {status_text} - {build_dir_name} ({time_str}) - {wim_relative_path}"
+            
+            list_item = QListWidgetItem(item_text)
+            list_item.setData(Qt.UserRole, wim_file)
+            
+            # 设置增强的工具提示
+            tooltip_info = (
+                f"WIM文件: {wim_file['name']}\n"
+                f"─────────────────\n"
+                f"构建目录: {build_dir_name}\n"
+                f"创建时间: {time_str}\n"
+                f"文件大小: {size_str}\n"
+                f"文件类型: {wim_file['type'].upper()}\n"
+                f"挂载状态: {status_text}\n"
+                f"相对路径: {wim_relative_path}\n"
+                f"─────────────────\n"
+                f"完整路径: {wim_file['path']}\n"
+                f"构建目录: {wim_file['build_dir']}"
+            )
+            list_item.setToolTip(tooltip_info)
+            
+            # 设置状态样式
+            if wim_file["mount_status"]:
+                # 已挂载项使用绿色背景和图标
+                list_item.setBackground(QColor("#E8F5E8"))
+                list_item.setForeground(QColor("#2E7D32"))  # 深绿色文字
+                list_item.setData(Qt.UserRole + 1, "mounted")
             else:
-                return "unknown"
-        except Exception:
-            return "unknown"
-    
-    def find_build_dir_for_wim(self, wim_path: Path) -> Optional[Path]:
-        """为WIM文件找到对应的构建目录"""
-        try:
-            # 如果是boot.wim，构建目录是上上级目录
-            if wim_path.name.lower() == "boot.wim":
-                # 路径应该是: build_dir/media/sources/boot.wim
-                if "sources" in str(wim_path) and "media" in str(wim_path):
-                    return wim_path.parent.parent.parent
-                else:
-                    # 如果路径格式不标准，尝试找到WinPE_开头的目录
-                    current = wim_path.parent
-                    while current != current.parent:
-                        if current.name.startswith("WinPE_"):
-                            return current
-                        current = current.parent
-
-            # 如果是winpe.wim，构建目录是上级目录
-            elif wim_path.name.lower() == "winpe.wim":
-                return wim_path.parent
-
-            # 对于其他WIM文件，尝试找到包含WinPE_的上级目录
-            current = wim_path.parent
-            while current != current.parent:  # 避免无限循环
-                if current.name.startswith("WinPE_"):
-                    return current
-                current = current.parent
-
-            # 如果没找到WinPE_目录，尝试其他常见的构建目录结构
-            # 检查是否有media目录
-            media_dir = wim_path.parent / "media"
-            if media_dir.exists():
-                return wim_path.parent
-
-            # 检查是否有mount目录
-            mount_dir = wim_path.parent / "mount"
-            if mount_dir.exists():
-                return wim_path.parent
-
-            # 如果没找到，返回文件所在目录
-            return wim_path.parent
-
-        except Exception:
-            return wim_path.parent
-    
-    
-    def check_mount_status(self, wim_file: Dict) -> bool:
-        """检查WIM文件的挂载状态"""
-        try:
-            if not wim_file or not wim_file.get("path"):
-                return False
-
-            wim_file_path = Path(wim_file["path"])
-            mount_dir = wim_file_path.parent / "mount"
-            if not mount_dir.exists():
-                return False
-            return bool(list(mount_dir.iterdir()))
-        except Exception:
-            return False
+                # 未挂载项使用默认样式
+                list_item.setForeground(QColor("#333333"))  # 深灰色文字
+                list_item.setData(Qt.UserRole + 1, "unmounted")
+            
+            self.wim_list.addItem(list_item)
+            
+        except Exception as e:
+            log_error(e, "添加WIM文件项")
     
     def get_selected_wim(self) -> Optional[Dict]:
         """获取选中的WIM文件"""
@@ -790,32 +579,25 @@ class WIMManagerDialog(QDialog):
                     self.restart_as_admin()
                 return
             
-            # 执行挂载操作
-            self.parent.log_message(f"开始挂载WIM映像: {wim_file['name']}")
-            
-            # 创建进度对话框
-            progress = QProgressDialog("正在挂载WIM映像...", "取消", 0, 100, self)
-            progress.setWindowTitle("挂载WIM映像")
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
-            
-            # 使用列表框中的构建目录和WIM文件路径
-            build_dir = wim_file["build_dir"]
-            wim_file_path = wim_file["path"]
-
-            # 创建挂载线程
-            self.mount_thread = MountThread(self.config_manager, self.adk_manager, self.parent, build_dir, wim_file_path)
-            self.mount_thread.progress_signal.connect(progress.setValue)
-            self.mount_thread.finished_signal.connect(self.on_mount_finished)
-            self.mount_thread.error_signal.connect(self.on_mount_error)
-            
-            # 保存进度对话框和WIM文件信息用于回调
-            self.current_progress = progress
-            self.current_wim_file = wim_file
-            self.current_build_dir = build_dir
-            
-            # 启动线程
-            self.mount_thread.start()
+            # 直接使用UnifiedWIMManager挂载
+            if not self.wim_manager:
+                self.init_wim_manager()
+                
+            if self.wim_manager:
+                self.add_log_message(f"开始挂载WIM映像: {wim_file['name']}", "info")
+                success, message = self.wim_manager.mount_wim(wim_file["build_dir"], wim_file["path"])
+                if success:
+                    self.add_log_message(f"挂载成功: {message}", "success")
+                    QMessageBox.information(self, "操作成功", f"挂载成功:\n{message}")
+                    self.parent.log_message(f"挂载成功: {message}")
+                    self.refresh_wim_list()
+                else:
+                    self.add_log_message(f"挂载失败: {message}", "error")
+                    QMessageBox.critical(self, "操作失败", f"挂载失败:\n{message}")
+                    self.parent.log_message(f"挂载失败: {message}")
+            else:
+                self.add_log_message("WIM管理器未初始化", "error")
+                QMessageBox.critical(self, "错误", "WIM管理器未初始化")
                 
         except Exception as e:
             log_error(e, "挂载WIM映像")
@@ -855,37 +637,85 @@ class WIMManagerDialog(QDialog):
                     self.restart_as_admin()
                 return
             
-            action = "保存" if commit else "放弃"
-            self.parent.log_message(f"开始卸载WIM映像并{action}: {wim_file['name']}")
-            
-            # 创建进度对话框
-            progress = QProgressDialog(f"正在卸载WIM映像并{action}...", "取消", 0, 100, self)
-            progress.setWindowTitle(f"卸载WIM映像并{action}")
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
-            
-            # 使用列表框中的构建目录
-            build_dir = wim_file["build_dir"]
-            wim_file_path = wim_file["path"]
-
-            # 创建卸载线程
-            self.unmount_thread = UnmountThread(self.config_manager, self.adk_manager, self.parent, build_dir, wim_file_path, commit)
-            self.unmount_thread.progress_signal.connect(progress.setValue)
-            self.unmount_thread.finished_signal.connect(self.on_unmount_finished)
-            self.unmount_thread.error_signal.connect(self.on_unmount_error)
-            
-            # 保存进度对话框和WIM文件信息用于回调
-            self.current_progress = progress
-            self.current_wim_file = wim_file
-            self.current_build_dir = build_dir
-            self.current_action = action
-            
-            # 启动线程
-            self.unmount_thread.start()
+            # 直接使用UnifiedWIMManager卸载
+            if not self.wim_manager:
+                self.init_wim_manager()
+                
+            if self.wim_manager:
+                action = "保存" if commit else "放弃"
+                self.add_log_message(f"开始卸载WIM映像并{action}: {wim_file['name']}", "info")
+                success, message = self.wim_manager.unmount_wim(wim_file["build_dir"], commit=commit)
+                if success:
+                    self.add_log_message(f"卸载成功: {message}", "success")
+                    QMessageBox.information(self, "操作成功", f"卸载成功:\n{message}")
+                    self.parent.log_message(f"卸载成功: {message}")
+                    self.refresh_wim_list()
+                else:
+                    self.add_log_message(f"卸载失败: {message}", "error")
+                    QMessageBox.critical(self, "操作失败", f"卸载失败:\n{message}")
+                    self.parent.log_message(f"卸载失败: {message}")
+            else:
+                self.add_log_message("WIM管理器未初始化", "error")
+                QMessageBox.critical(self, "错误", "WIM管理器未初始化")
                 
         except Exception as e:
             log_error(e, f"卸载WIM映像并{action}")
             QMessageBox.critical(self, "错误", f"卸载WIM映像时发生错误: {str(e)}")
+    
+    def create_iso(self):
+        """创建ISO"""
+        try:
+            wim_file = self.get_selected_wim()
+            if not wim_file:
+                QMessageBox.warning(self, "提示", "请先选择要创建ISO的WIM映像文件")
+                return
+            
+            # 选择ISO输出路径
+            iso_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "选择ISO输出路径",
+                str(wim_file["build_dir"] / f"{wim_file['build_dir'].name}.iso"),
+                "ISO文件 (*.iso)"
+            )
+            
+            if not iso_path:
+                return
+            
+            # 检查管理员权限
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                reply = QMessageBox.question(
+                    self, "需要管理员权限",
+                    "ISO创建操作需要管理员权限。\n\n是否以管理员身份重新启动程序？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    self.restart_as_admin()
+                return
+            
+            # 直接使用UnifiedWIMManager创建ISO
+            if not self.wim_manager:
+                self.init_wim_manager()
+                
+            if self.wim_manager:
+                self.add_log_message(f"开始创建ISO: {Path(iso_path).name}", "info")
+                success, message = self.wim_manager.create_iso(wim_file["build_dir"], Path(iso_path))
+                if success:
+                    self.add_log_message(f"ISO创建成功: {message}", "success")
+                    QMessageBox.information(self, "操作成功", f"ISO创建成功:\n{message}")
+                    self.parent.log_message(f"ISO创建成功: {message}")
+                else:
+                    self.add_log_message(f"ISO创建失败: {message}", "error")
+                    QMessageBox.critical(self, "操作失败", f"ISO创建失败:\n{message}")
+                    self.parent.log_message(f"ISO创建失败: {message}")
+            else:
+                self.add_log_message("WIM管理器未初始化", "error")
+                QMessageBox.critical(self, "错误", "WIM管理器未初始化")
+                
+        except Exception as e:
+            log_error(e, "创建ISO")
+            QMessageBox.critical(self, "错误", f"创建ISO时发生错误: {str(e)}")
     
     def create_usb_bootable(self):
         """制作USB启动盘"""
@@ -905,8 +735,6 @@ class WIMManagerDialog(QDialog):
             
             if not usb_path:
                 return
-            
-            usb_path = Path(usb_path)
             
             # 确认制作USB启动盘
             reply = QMessageBox.question(
@@ -937,285 +765,340 @@ class WIMManagerDialog(QDialog):
                 if reply == QMessageBox.Yes:
                     self.restart_as_admin()
                 return
-            else:
-                return
             
-            self.parent.log_message(f"开始制作USB启动盘: {wim_file['name']} -> {usb_path}")
-            
-            # 创建进度对话框
-            progress = QProgressDialog("正在制作USB启动盘...", "取消", 0, 100, self)
-            progress.setWindowTitle("制作USB启动盘")
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
-            
-            try:
-                # 执行USB启动盘制作
-                success, message = self._create_usb_bootable_device(wim_file, usb_path, progress)
+            # 直接使用UnifiedWIMManager制作USB
+            if not self.wim_manager:
+                self.init_wim_manager()
                 
-                progress.setValue(100)
-                progress.close()
-                
+            if self.wim_manager:
+                self.add_log_message(f"开始制作USB启动盘: {Path(usb_path).name}", "info")
+                success, message = self.wim_manager.create_usb(wim_file["build_dir"], Path(usb_path))
                 if success:
-                    QMessageBox.information(self, "制作成功", f"USB启动盘制作成功:\n{usb_path}")
-                    self.parent.log_message(f"USB启动盘制作成功: {usb_path}")
+                    self.add_log_message(f"USB制作成功: {message}", "success")
+                    QMessageBox.information(self, "操作成功", f"USB制作成功:\n{message}")
+                    self.parent.log_message(f"USB制作成功: {message}")
                 else:
-                    QMessageBox.critical(self, "制作失败", f"USB启动盘制作失败:\n{message}")
-                    self.parent.log_message(f"USB启动盘制作失败: {message}")
-                    
-            except Exception as e:
-                progress.close()
-                log_error(e, "制作USB启动盘")
-                QMessageBox.critical(self, "错误", f"制作USB启动盘时发生错误: {str(e)}")
+                    self.add_log_message(f"USB制作失败: {message}", "error")
+                    QMessageBox.critical(self, "操作失败", f"USB制作失败:\n{message}")
+                    self.parent.log_message(f"USB制作失败: {message}")
+            else:
+                self.add_log_message("WIM管理器未初始化", "error")
+                QMessageBox.critical(self, "错误", "WIM管理器未初始化")
                 
         except Exception as e:
             log_error(e, "制作USB启动盘")
             QMessageBox.critical(self, "错误", f"制作USB启动盘时发生错误: {str(e)}")
     
-    def _create_usb_bootable_device(self, wim_file: Dict, usb_path: Path, progress: QProgressDialog) -> Tuple[bool, str]:
-        """制作USB启动盘设备"""
+    def quick_check(self):
+        """快速检查"""
         try:
-            progress.setValue(10)
-            progress.setLabelText("准备USB设备...")
+            wim_file = self.get_selected_wim()
+            if not wim_file:
+                QMessageBox.warning(self, "提示", "请先选择要检查的WIM映像文件")
+                return
             
-            # 检查USB路径是否存在
-            if not usb_path.exists():
-                return False, f"USB驱动器路径不存在: {usb_path}"
+            if not self.wim_manager:
+                QMessageBox.warning(self, "提示", "WIM管理器未初始化")
+                return
             
-            # 检查是否为可移动设备
-            if not self.is_removable_device(usb_path):
-                reply = QMessageBox.question(
-                    self,
-                    "设备类型确认",
-                    f"选定的路径可能不是可移动设备:\n{usb_path}\n\n"
-                    "继续制作可能导致数据丢失。\n\n"
-                    "确定要继续吗？",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                
-                if reply != QMessageBox.Yes:
-                    return False, "用户取消操作"
+            self.add_log_message(f"开始快速检查: {wim_file['name']}", "info")
+            # 直接使用UnifiedWIMManager执行快速检查
+            check_result = self.wim_manager.quick_mount_check(wim_file["build_dir"])
             
-            progress.setValue(20)
-            progress.setLabelText("格式化USB设备...")
+            # 显示检查结果
+            result_text = f"快速检查结果:\n\n"
+            result_text += f"构建目录: {check_result.get('build_dir', 'N/A')}\n"
+            result_text += f"主要WIM文件: {check_result.get('primary_wim', 'N/A')}\n"
+            result_text += f"挂载状态: {'已挂载' if check_result.get('mount_status', {}).get('is_mounted', False) else '未挂载'}\n"
+            result_text += f"挂载检查: {'通过' if check_result.get('mount_check_passed', False) else '失败'}\n"
             
-            # 格式化USB设备
-            format_success, format_message = self.format_usb_device(usb_path)
-            if not format_success:
-                return False, f"USB设备格式化失败: {format_message}"
+            if check_result.get('mount_check_message'):
+                result_text += f"检查消息: {check_result['mount_check_message']}\n"
             
-            progress.setValue(40)
-            progress.setLabelText("复制WIM文件...")
+            if check_result.get('recommendations'):
+                result_text += f"\n建议:\n"
+                for rec in check_result['recommendations']:
+                    result_text += f"• {rec}\n"
             
-            # 复制WIM文件到USB设备
-            copy_success, copy_message = self.copy_wim_to_usb(wim_file, usb_path)
-            if not copy_success:
-                return False, f"WIM文件复制失败: {copy_message}"
-            
-            progress.setValue(60)
-            progress.setLabelText("设置启动扇区...")
-            
-            # 设置启动扇区
-            boot_success, boot_message = self.setup_usb_boot_sector(usb_path)
-            if not boot_success:
-                return False, f"启动扇区设置失败: {boot_message}"
-            
-            progress.setValue(80)
-            progress.setLabelText("验证USB启动盘...")
-            
-            # 验证USB启动盘
-            verify_success, verify_message = self.verify_usb_bootable(usb_path)
-            if not verify_success:
-                return False, f"USB启动盘验证失败: {verify_message}"
-            
-            progress.setValue(100)
-            return True, f"USB启动盘制作成功: {usb_path}"
-            
-        except Exception as e:
-            return False, f"制作USB启动盘时发生错误: {str(e)}"
-    
-    def is_removable_device(self, path: Path) -> bool:
-        """检查是否为可移动设备"""
-        try:
-            # 在Windows上检查驱动器类型
-            if platform.system() == "Windows":
-                try:
-                    import win32api
-                    import win32file
-                    
-                    drive = str(path)[:2]  # 获取驱动器字母
-                    drive_type = win32api.GetDriveType(drive + "\\")
-                    
-                    # DRIVE_REMOVABLE = 2
-                    return drive_type == 2
-                except ImportError:
-                    # 如果win32api不可用，使用简单检查
-                    return True  # 假设是可移动设备
-            
-            return False
-        except Exception:
-            return False
-    
-    def format_usb_device(self, usb_path: Path) -> Tuple[bool, str]:
-        """格式化USB设备"""
-        try:
-            # 使用Windows格式化命令
-            drive = str(usb_path)[:2]
-            
-            # 格式化为FAT32文件系统
-            cmd = f'format {drive}: /FS:FAT32 /Q /X'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                return True, "USB设备格式化成功"
-            else:
-                return False, f"格式化命令失败: {result.stderr}"
+            QMessageBox.information(self, "快速检查结果", result_text)
                 
         except Exception as e:
-            return False, f"格式化USB设备时发生错误: {str(e)}"
+            log_error(e, "快速检查")
+            QMessageBox.critical(self, "错误", f"快速检查时发生错误: {str(e)}")
     
-    def copy_wim_to_usb(self, wim_file: Dict, usb_path: Path) -> Tuple[bool, str]:
-        """复制WIM文件到USB设备"""
+    def smart_cleanup(self):
+        """智能清理"""
         try:
-            # 复制WIM文件
-            import shutil
+            wim_file = self.get_selected_wim()
+            if not wim_file:
+                QMessageBox.warning(self, "提示", "请先选择要清理的构建目录")
+                return
             
-            source_path = wim_file["path"]
-            dest_path = usb_path / wim_file["path"].name
+            # 确认清理
+            reply = QMessageBox.question(
+                self,
+                "确认智能清理",
+                f"即将对构建目录进行智能清理:\n\n"
+                f"构建目录: {wim_file['build_dir'].name}\n\n"
+                f"智能清理将:\n"
+                f"• 卸载已挂载的WIM镜像\n"
+                f"• 清理临时文件和挂载目录\n"
+                f"• 验证构建目录结构\n\n"
+                f"确定要继续吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
             
-            shutil.copy2(source_path, dest_path)
+            if reply != QMessageBox.Yes:
+                return
             
-            return True, "WIM文件复制成功"
-            
-        except Exception as e:
-            return False, f"复制WIM文件时发生错误: {str(e)}"
-    
-    def setup_usb_boot_sector(self, usb_path: Path) -> Tuple[bool, str]:
-        """设置USB启动扇区"""
-        try:
-            # 使用diskpart设置活动分区
-            drive = str(usb_path)[:2]
-            
-            script = f"""
-select volume {drive}=1
-active
-exit
-"""
-            
-            # 创建临时脚本文件
-            script_file = usb_path / "setup_boot.txt"
-            with open(script_file, 'w') as f:
-                f.write(script)
-            
-            # 执行diskpart命令
-            cmd = f'diskpart /s {script_file}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            
-            # 清理临时文件
-            try:
-                script_file.unlink()
-            except:
-                pass
-            
-            if result.returncode == 0:
-                return True, "USB启动扇区设置成功"
-            else:
-                return False, f"启动扇区设置失败: {result.stderr}"
+            # 直接使用UnifiedWIMManager执行智能清理
+            if not self.wim_manager:
+                self.init_wim_manager()
                 
-        except Exception as e:
-            return False, f"设置USB启动扇区时发生错误: {str(e)}"
-    
-    def verify_usb_bootable(self, usb_path: Path) -> Tuple[bool, str]:
-        """验证USB启动盘"""
-        try:
-            # 检查关键文件是否存在
-            wim_files = list(usb_path.glob("*.wim"))
-            
-            if not wim_files:
-                return False, "USB设备上未找到WIM文件"
-            
-            # 检查启动扇区
-            drive = str(usb_path)[:2]
-            cmd = f'diskpart /s "list volume"'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                # 检查是否有活动分区
-                if "Active" in result.stdout:
-                    return True, "USB启动盘验证成功"
+            if self.wim_manager:
+                self.add_log_message(f"开始智能清理: {wim_file['build_dir'].name}", "info")
+                cleanup_result = self.wim_manager.smart_cleanup(wim_file["build_dir"])
+                if cleanup_result.get("success", False):
+                    actions = cleanup_result.get("actions_taken", [])
+                    message = f"智能清理完成，执行了 {len(actions)} 个操作"
+                    if cleanup_result.get("warnings"):
+                        message += f"，有 {len(cleanup_result['warnings'])} 个警告"
+                    self.add_log_message(f"智能清理成功: {message}", "success")
+                    QMessageBox.information(self, "操作成功", f"智能清理成功:\n{message}")
+                    self.parent.log_message(f"智能清理成功: {message}")
+                    self.refresh_wim_list()
                 else:
-                    return False, "USB设备未设置活动分区"
+                    warnings = cleanup_result.get("warnings", [])
+                    message = "智能清理失败"
+                    if warnings:
+                        message += f"，有 {len(warnings)} 个警告"
+                    self.add_log_message(f"智能清理失败: {message}", "error")
+                    QMessageBox.critical(self, "操作失败", f"智能清理失败:\n{message}")
+                    self.parent.log_message(f"智能清理失败: {message}")
             else:
-                return False, f"无法验证启动扇区: {result.stderr}"
+                self.add_log_message("WIM管理器未初始化", "error")
+                QMessageBox.critical(self, "错误", "WIM管理器未初始化")
                 
         except Exception as e:
-            return False, f"验证USB启动盘时发生错误: {str(e)}"
+            log_error(e, "智能清理")
+            QMessageBox.critical(self, "错误", f"智能清理时发生错误: {str(e)}")
     
-    def on_mount_finished(self, success: bool, message: str):
-        """挂载完成回调"""
+    def show_diagnostics(self):
+        """显示诊断信息"""
+        try:
+            wim_file = self.get_selected_wim()
+            if not wim_file:
+                QMessageBox.warning(self, "提示", "请先选择要诊断的WIM映像文件")
+                return
+            
+            if not self.wim_manager:
+                QMessageBox.warning(self, "提示", "WIM管理器未初始化")
+                return
+            
+            # 直接使用UnifiedWIMManager获取诊断信息
+            diagnostics = self.wim_manager.get_diagnostics(wim_file["build_dir"])
+            
+            # 显示诊断信息
+            diag_text = f"诊断信息:\n\n"
+            diag_text += f"时间戳: {diagnostics.get('timestamp', 'N/A')}\n"
+            diag_text += f"构建目录: {diagnostics.get('build_directory', 'N/A')}\n\n"
+            
+            # 构建信息
+            build_info = diagnostics.get('build_info', {})
+            if build_info:
+                diag_text += "构建信息:\n"
+                diag_text += f"• WIM文件数量: {len(build_info.get('wim_files', []))}\n"
+                diag_text += f"• 创建时间: {build_info.get('created_time', 'N/A')}\n\n"
+            
+            # 挂载状态
+            mount_status = diagnostics.get('mount_status', {})
+            if mount_status:
+                diag_text += "挂载状态:\n"
+                diag_text += f"• 挂载状态: {'已挂载' if mount_status.get('is_mounted', False) else '未挂载'}\n"
+                diag_text += f"• 挂载目录: {mount_status.get('mount_dir', 'N/A')}\n\n"
+            
+            # 验证结果
+            validation = diagnostics.get('validation', {})
+            if validation:
+                diag_text += "结构验证:\n"
+                diag_text += f"• 验证状态: {'通过' if validation.get('is_valid', False) else '失败'}\n"
+                if validation.get('errors'):
+                    diag_text += "• 错误:\n"
+                    for error in validation['errors']:
+                        diag_text += f"  - {error}\n"
+                if validation.get('warnings'):
+                    diag_text += "• 警告:\n"
+                    for warning in validation['warnings']:
+                        diag_text += f"  - {warning}\n"
+                diag_text += "\n"
+            
+            # 系统状态
+            system_status = diagnostics.get('system_info', {})
+            if system_status:
+                diag_text += "系统状态:\n"
+                diag_text += f"• Python版本: {system_status.get('python_version', 'N/A')}\n"
+                diag_text += f"• 平台: {system_status.get('platform', 'N/A')}\n"
+                diag_text += f"• 管理员权限: {'是' if system_status.get('is_admin', False) else '否'}\n"
+            
+            QMessageBox.information(self, "诊断信息", diag_text)
+                
+        except Exception as e:
+            log_error(e, "显示诊断信息")
+            QMessageBox.critical(self, "错误", f"显示诊断信息时发生错误: {str(e)}")
+    
+    def clear_log(self):
+        """清空日志"""
+        try:
+            self.log_text.clear()
+            self.add_log_message("日志已清空", "info")
+        except Exception as e:
+            log_error(e, "清空日志")
+    
+    def add_log_message(self, message: str, level: str = "info"):
+        """添加日志消息到日志窗口"""
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            # 根据日志级别设置颜色
+            if level == "error":
+                color = "#ff6b6b"
+                prefix = "❌"
+            elif level == "warning":
+                color = "#ffa726"
+                prefix = "⚠️"
+            elif level == "success":
+                color = "#51cf66"
+                prefix = "✅"
+            else:
+                color = "#d4d4d4"
+                prefix = "ℹ️"
+            
+            # 使用简单文本格式，与系统日志保持一致
+            formatted_message = f"[{timestamp}] {prefix} {message}"
+            
+            # 添加到日志窗口
+            self.log_text.append(formatted_message)
+            
+            # 确保总是显示最后一行
+            self.log_text.moveCursor(self.log_text.textCursor().End)
+            self.log_text.ensureCursorVisible()
+            # 强制滚动到底部
+            scrollbar = self.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+            
+            # 可选：如果需要颜色，可以设置文本格式
+            cursor = self.log_text.textCursor()
+            cursor.movePosition(cursor.End)
+            cursor.select(cursor.BlockUnderCursor)
+            
+            # 根据消息内容设置文本颜色
+            if message.startswith("==="):
+                # 分隔线，使用蓝色
+                self.log_text.setTextColor(QColor("#0066CC"))
+            elif message.startswith("✅"):
+                # 成功消息，绿色
+                self.log_text.setTextColor(QColor("green"))
+            elif message.startswith("❌"):
+                # 错误消息，红色
+                self.log_text.setTextColor(QColor("red"))
+            elif message.startswith("⚠️"):
+                # 警告消息，橙色
+                self.log_text.setTextColor(QColor("orange"))
+            elif message.startswith("ℹ️"):
+                # 信息消息，蓝色
+                self.log_text.setTextColor(QColor("#0066CC"))
+            elif message.startswith("步骤"):
+                # 步骤消息，紫色
+                self.log_text.setTextColor(QColor("#800080"))
+            elif message.startswith("🎉"):
+                # 完成消息，特殊颜色
+                self.log_text.setTextColor(QColor("#FF1493"))
+            else:
+                # 普通消息，黑色
+                self.log_text.setTextColor(QColor("black"))
+            
+            self.log_text.setTextCursor(cursor)
+            
+        except Exception as e:
+            log_error(e, "添加日志消息")
+    
+    def execute_wim_operation(self, operation: str, build_dir: Path, **kwargs):
+        """执行WIM操作"""
+        try:
+            # 创建进度对话框
+            operation_names = {
+                "mount": "挂载WIM映像",
+                "unmount": "卸载WIM映像",
+                "create_iso": "创建ISO",
+                "create_usb": "制作USB启动盘",
+                "smart_cleanup": "智能清理"
+            }
+            
+            operation_name = operation_names.get(operation, operation)
+            progress = QProgressDialog(f"正在{operation_name}...", "取消", 0, 100, self)
+            progress.setWindowTitle(operation_name)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            # 创建操作线程
+            self.operation_thread = WIMOperationThread(
+                self.config_manager, 
+                self.adk_manager, 
+                self.parent, 
+                operation, 
+                build_dir, 
+                **kwargs
+            )
+            self.operation_thread.progress_signal.connect(progress.setValue)
+            self.operation_thread.log_signal.connect(lambda msg: self.parent.log_message(f"[WIM] {msg}"))
+            self.operation_thread.finished_signal.connect(self.on_operation_finished)
+            self.operation_thread.error_signal.connect(self.on_operation_error)
+            
+            # 保存进度对话框
+            self.current_progress = progress
+            self.current_operation = operation_name
+            
+            # 启动线程
+            self.operation_thread.start()
+                
+        except Exception as e:
+            log_error(e, f"执行WIM操作: {operation}")
+            QMessageBox.critical(self, "错误", f"执行WIM操作时发生错误: {str(e)}")
+    
+    def on_operation_finished(self, success: bool, message: str):
+        """操作完成回调"""
         try:
             # 关闭进度对话框
             if hasattr(self, 'current_progress'):
                 self.current_progress.close()
             
             if success:
-                QMessageBox.information(self, "挂载成功", f"WIM映像挂载成功:\n{self.current_wim_file['name']}")
-                self.parent.log_message(f"WIM映像挂载成功: {self.current_wim_file['name']}")
-                self.refresh_directories()
+                QMessageBox.information(self, "操作成功", f"{self.current_operation}成功:\n{message}")
+                self.parent.log_message(f"{self.current_operation}成功: {message}")
+                self.refresh_wim_list()
             else:
-                QMessageBox.critical(self, "挂载失败", f"WIM映像挂载失败:\n{message}")
-                self.parent.log_message(f"WIM映像挂载失败: {message}")
+                QMessageBox.critical(self, "操作失败", f"{self.current_operation}失败:\n{message}")
+                self.parent.log_message(f"{self.current_operation}失败: {message}")
                 
         except Exception as e:
-            log_error(e, "挂载完成回调")
-            QMessageBox.critical(self, "错误", f"处理挂载结果时发生错误: {str(e)}")
+            log_error(e, "操作完成回调")
+            QMessageBox.critical(self, "错误", f"处理操作结果时发生错误: {str(e)}")
     
-    def on_mount_error(self, error_message: str):
-        """挂载错误回调"""
+    def on_operation_error(self, error_message: str):
+        """操作错误回调"""
         try:
             # 关闭进度对话框
             if hasattr(self, 'current_progress'):
                 self.current_progress.close()
             
-            QMessageBox.critical(self, "挂载错误", f"挂载过程中发生错误:\n{error_message}")
-            self.parent.log_message(f"挂载过程中发生错误: {error_message}")
+            QMessageBox.critical(self, "操作错误", f"{self.current_operation}过程中发生错误:\n{error_message}")
+            self.parent.log_message(f"{self.current_operation}过程中发生错误: {error_message}")
                 
         except Exception as e:
-            log_error(e, "挂载错误回调")
-            QMessageBox.critical(self, "错误", f"处理挂载错误时发生错误: {str(e)}")
-    
-    def on_unmount_finished(self, success: bool, message: str):
-        """卸载完成回调"""
-        try:
-            # 关闭进度对话框
-            if hasattr(self, 'current_progress'):
-                self.current_progress.close()
-            
-            if success:
-                QMessageBox.information(self, "卸载成功", f"WIM映像卸载成功并{self.current_action}:\n{self.current_wim_file['name']}")
-                self.parent.log_message(f"WIM映像卸载成功并{self.current_action}: {self.current_wim_file['name']}")
-                self.refresh_directories()
-            else:
-                QMessageBox.critical(self, "卸载失败", f"WIM映像卸载失败:\n{message}")
-                self.parent.log_message(f"WIM映像卸载失败: {message}")
-                
-        except Exception as e:
-            log_error(e, "卸载完成回调")
-            QMessageBox.critical(self, "错误", f"处理卸载结果时发生错误: {str(e)}")
-    
-    def on_unmount_error(self, error_message: str):
-        """卸载错误回调"""
-        try:
-            # 关闭进度对话框
-            if hasattr(self, 'current_progress'):
-                self.current_progress.close()
-            
-            QMessageBox.critical(self, "卸载错误", f"卸载过程中发生错误:\n{error_message}")
-            self.parent.log_message(f"卸载过程中发生错误: {error_message}")
-                
-        except Exception as e:
-            log_error(e, "卸载错误回调")
-            QMessageBox.critical(self, "错误", f"处理卸载错误时发生错误: {str(e)}")
+            log_error(e, "操作错误回调")
+            QMessageBox.critical(self, "错误", f"处理操作错误时发生错误: {str(e)}")
     
     def on_item_double_clicked(self, item):
         """双击列表项事件"""
@@ -1226,9 +1109,11 @@ exit
             
             # 如果已挂载，打开挂载目录
             if wim_file["mount_status"]:
-                # 使用WIM文件所在目录的mount子目录
-                wim_file_path = Path(wim_file["path"])
-                mount_dir = wim_file_path.parent / "mount"
+                # 使用统一挂载目录
+                if self.wim_manager:
+                    mount_dir = self.wim_manager.get_mount_dir(wim_file["build_dir"])
+                else:
+                    mount_dir = wim_file["build_dir"] / "mount"
                 
                 if mount_dir.exists():
                     # 打开文件管理器
@@ -1265,13 +1150,9 @@ exit
         """窗口关闭事件"""
         try:
             # 停止所有线程
-            if hasattr(self, 'mount_thread') and self.mount_thread.isRunning():
-                self.mount_thread.stop()
-                self.mount_thread.wait(3000)
-            
-            if hasattr(self, 'unmount_thread') and self.unmount_thread.isRunning():
-                self.unmount_thread.stop()
-                self.unmount_thread.wait(3000)
+            if hasattr(self, 'operation_thread') and self.operation_thread.isRunning():
+                self.operation_thread.stop()
+                self.operation_thread.wait(3000)
             
             event.accept()
             

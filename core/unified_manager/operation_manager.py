@@ -92,6 +92,24 @@ class OperationManager:
                 log_build_step("WIM挂载成功", f"挂载目录: {mount_dir}")
                 log_system_event("WIM挂载", "WIM镜像挂载成功", "info")
                 
+                # 创建挂载信息文件
+                mount_info_file = mount_dir / ".mount_info"
+                try:
+                    with open(mount_info_file, 'w', encoding='utf-8') as f:
+                        f.write(f"mounted_wim: {wim_file_path}\n")
+                        f.write(f"mount_time: {self._get_current_timestamp()}\n")
+                        f.write(f"build_dir: {build_dir}\n")
+                    
+                    # 创建WIM文件特定的挂载标记文件
+                    wim_name = wim_file_path.stem
+                    mount_marker_file = mount_dir / f".{wim_name}_mounted"
+                    mount_marker_file.touch()
+                    
+                    self.logger.debug(f"创建挂载信息文件: {mount_info_file}")
+                    self.logger.debug(f"创建挂载标记文件: {mount_marker_file}")
+                except Exception as e:
+                    self.logger.warning(f"创建挂载信息文件失败: {str(e)}")
+                
                 # 验证挂载结果
                 if mount_dir.exists() and any(mount_dir.iterdir()):
                     # 只统计关键目录数量，避免列出所有文件
@@ -164,6 +182,24 @@ class OperationManager:
                 self.logger.info(f"✅ WIM镜像{action}卸载成功")
                 log_build_step("WIM卸载成功", f"{action}卸载完成")
                 log_system_event("WIM卸载", f"WIM镜像{action}卸载成功", "info")
+                
+                # 删除挂载信息文件
+                mount_info_file = mount_dir / ".mount_info"
+                try:
+                    if mount_info_file.exists():
+                        mount_info_file.unlink()
+                        self.logger.debug(f"删除挂载信息文件: {mount_info_file}")
+                    
+                    # 删除所有WIM文件特定的挂载标记文件
+                    for marker_file in mount_dir.glob(".*_mounted"):
+                        try:
+                            marker_file.unlink()
+                            self.logger.debug(f"删除挂载标记文件: {marker_file}")
+                        except Exception as e:
+                            self.logger.warning(f"删除挂载标记文件失败: {str(e)}")
+                            
+                except Exception as e:
+                    self.logger.warning(f"删除挂载信息文件失败: {str(e)}")
                 
                 # 验证卸载结果
                 if not mount_dir.exists() or not any(mount_dir.iterdir()):
@@ -402,8 +438,31 @@ class OperationManager:
     def _force_unmount(self, mount_dir: Path) -> Tuple[bool, str]:
         """强制卸载"""
         try:
+            # 删除挂载信息文件
+            mount_info_file = mount_dir / ".mount_info"
+            try:
+                if mount_info_file.exists():
+                    mount_info_file.unlink()
+                    self.logger.debug(f"强制卸载时删除挂载信息文件: {mount_info_file}")
+                
+                # 删除所有WIM文件特定的挂载标记文件
+                for marker_file in mount_dir.glob(".*_mounted"):
+                    try:
+                        marker_file.unlink()
+                        self.logger.debug(f"强制卸载时删除挂载标记文件: {marker_file}")
+                    except Exception as e:
+                        self.logger.warning(f"删除挂载标记文件失败: {str(e)}")
+                            
+            except Exception as e:
+                self.logger.warning(f"删除挂载信息文件失败: {str(e)}")
+            
             # 这里可以实现更复杂的强制卸载逻辑
             # 目前简单返回成功，实际使用中需要调用DISM强制卸载
             return True, "强制卸载成功"
         except Exception as e:
             return False, f"强制卸载失败: {str(e)}"
+    
+    def _get_current_timestamp(self) -> str:
+        """获取当前时间戳"""
+        from datetime import datetime
+        return datetime.now().isoformat()

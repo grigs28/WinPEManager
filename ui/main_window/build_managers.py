@@ -220,7 +220,7 @@ class BuildManagers:
             log_error(e, "停止构建")
 
     def refresh_builds_list(self):
-        """按照WIM管理逻辑刷新已构建目录中的WIM文件列表"""
+        """使用UnifiedWIMManager刷新已构建目录中的WIM文件列表"""
         try:
             self.main_window.builds_list.clear()
 
@@ -229,9 +229,11 @@ class BuildManagers:
             if not workspace.exists():
                 workspace = Path.cwd() / "workspace" / "WinPE_Build"
 
-            # 按照WIM管理的逻辑扫描所有构建目录中的WIM文件
+            # 使用UnifiedWIMManager扫描所有构建目录中的WIM文件
             if workspace.exists():
-                all_wim_files = self._scan_wim_files_from_build_dirs(workspace)
+                from core.unified_manager import UnifiedWIMManager
+                wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.main_window)
+                all_wim_files = wim_manager.find_wim_files(workspace)
 
                 # 按修改时间排序
                 all_wim_files.sort(key=lambda x: x["build_dir"].stat().st_mtime, reverse=True)
@@ -302,193 +304,7 @@ class BuildManagers:
             from utils.logger import log_error
             log_error(e, "刷新构建目录WIM文件列表")
 
-    def _scan_wim_files_from_build_dirs(self, root_dir: Path) -> List[Dict]:
-        """递归扫描目录中的所有WIM文件，完全仿照WIM管理的逻辑"""
-        wim_files = []
-
-        try:
-            # 首先获取所有构建目录（以WinPE_开头的目录）
-            build_dirs = []
-            for item in root_dir.iterdir():
-                if item.is_dir() and item.name.startswith("WinPE_"):
-                    build_dirs.append(item)
-
-            # 为每个构建目录扫描WIM文件
-            for build_dir in build_dirs:
-                wim_files.extend(self._scan_wim_files_in_build_dir(build_dir))
-
-            # 也扫描其他位置的WIM文件（比如旧的构建格式）
-            for item in root_dir.rglob("*"):
-                if item.is_file() and item.suffix.lower() == '.wim':
-                    # 检查是否已经在构建目录中处理过
-                    already_processed = False
-                    for wim_file in wim_files:
-                        if str(item) == str(wim_file["path"]):
-                            already_processed = True
-                            break
-
-                    if not already_processed:
-                        # 确定WIM文件类型
-                        wim_type = self._determine_wim_type(item)
-
-                        # 获取构建目录（WIM文件所在的上级目录）
-                        build_dir = self._find_build_dir_for_wim(item)
-
-                        if build_dir:
-                            wim_files.append({
-                                "path": item,
-                                "name": item.name,
-                                "type": wim_type,
-                                "size": item.stat().st_size,
-                                "mount_status": self._check_mount_status({"path": str(item)}),
-                                "build_dir": build_dir
-                            })
-                        else:
-                            # 如果找不到构建目录，使用文件所在目录
-                            wim_files.append({
-                                "path": item,
-                                "name": item.name,
-                                "type": wim_type,
-                                "size": item.stat().st_size,
-                                "mount_status": False,  # 默认未挂载
-                                "build_dir": item.parent
-                            })
-
-        except Exception as e:
-            from utils.logger import log_error
-            log_error(e, f"递归扫描WIM文件: {root_dir}")
-
-        return wim_files
-
-    def _find_build_dir_for_wim(self, wim_path: Path) -> Optional[Path]:
-        """为WIM文件找到对应的构建目录，仿照WIM管理的逻辑"""
-        try:
-            # 如果是boot.wim，构建目录是上上级目录
-            if wim_path.name.lower() == "boot.wim":
-                # 路径应该是: build_dir/media/sources/boot.wim
-                if "sources" in str(wim_path) and "media" in str(wim_path):
-                    return wim_path.parent.parent.parent
-                else:
-                    # 如果路径格式不标准，尝试找到WinPE_开头的目录
-                    current = wim_path.parent
-                    while current != current.parent:
-                        if current.name.startswith("WinPE_"):
-                            return current
-                        current = current.parent
-
-            # 如果是winpe.wim，构建目录是上级目录
-            elif wim_path.name.lower() == "winpe.wim":
-                return wim_path.parent
-
-            # 对于其他WIM文件，尝试找到包含WinPE_的上级目录
-            current = wim_path.parent
-            while current != current.parent:  # 避免无限循环
-                if current.name.startswith("WinPE_"):
-                    return current
-                current = current.parent
-
-            # 如果没找到WinPE_目录，尝试其他常见的构建目录结构
-            # 检查是否有media目录
-            media_dir = wim_path.parent / "media"
-            if media_dir.exists():
-                return wim_path.parent
-
-            # 检查是否有mount目录
-            mount_dir = wim_path.parent / "mount"
-            if mount_dir.exists():
-                return wim_path.parent
-
-            # 如果没找到，返回文件所在目录
-            return wim_path.parent
-
-        except Exception:
-            return wim_path.parent
-
-    def _scan_wim_files_in_build_dir(self, build_dir: Path) -> List[Dict]:
-        """扫描特定构建目录中的WIM文件，仿照WIM管理的逻辑"""
-        wim_files = []
-
-        try:
-            # 检查构建目录是否存在
-            if not build_dir.exists():
-                return wim_files
-
-            # 扫描boot.wim（在media/sources目录下）
-            boot_wim_path = build_dir / "media" / "sources" / "boot.wim"
-            if boot_wim_path.exists():
-                wim_files.append({
-                    "path": boot_wim_path,
-                    "name": boot_wim_path.name,
-                    "type": "copype",
-                    "size": boot_wim_path.stat().st_size,
-                    "mount_status": self._check_mount_status({"path": str(boot_wim_path)}),
-                    "build_dir": build_dir
-                })
-
-            # 扫描winpe.wim（在构建目录根目录下）
-            winpe_wim_path = build_dir / "winpe.wim"
-            if winpe_wim_path.exists():
-                wim_files.append({
-                    "path": winpe_wim_path,
-                    "name": winpe_wim_path.name,
-                    "type": "dism",
-                    "size": winpe_wim_path.stat().st_size,
-                    "mount_status": self._check_mount_status({"path": str(winpe_wim_path)}),
-                    "build_dir": build_dir
-                })
-
-            # 扫描其他WIM文件（递归搜索）
-            for item in build_dir.rglob("*.wim"):
-                # 跳过已经处理过的文件
-                if item.name.lower() in ["boot.wim", "winpe.wim"]:
-                    continue
-
-                # 确定WIM文件类型
-                wim_type = self._determine_wim_type(item)
-
-                wim_files.append({
-                    "path": item,
-                    "name": item.name,
-                    "type": wim_type,
-                    "size": item.stat().st_size,
-                    "mount_status": self._check_mount_status({"path": str(item)}),
-                    "build_dir": build_dir
-                })
-
-        except Exception as e:
-            from utils.logger import log_error
-            log_error(e, f"扫描构建目录WIM文件: {build_dir}")
-
-        return wim_files
-
-    def _determine_wim_type(self, wim_path: Path) -> str:
-        """确定WIM文件类型，仿照WIM管理的逻辑"""
-        try:
-            # 根据文件名和路径判断类型
-            if wim_path.name.lower() == "boot.wim":
-                return "copype"
-            elif wim_path.name.lower() == "winpe.wim":
-                return "dism"
-            elif "sources" in str(wim_path).lower():
-                return "copype"
-            else:
-                return "unknown"
-        except Exception:
-            return "unknown"
-
-    def _check_mount_status(self, wim_file: Dict) -> bool:
-        """检查WIM文件的挂载状态，仿照WIM管理的逻辑"""
-        try:
-            if not wim_file or not wim_file.get("path"):
-                return False
-
-            wim_file_path = Path(wim_file["path"])
-            mount_dir = wim_file_path.parent / "mount"
-            if not mount_dir.exists():
-                return False
-            return bool(list(mount_dir.iterdir()))
-        except Exception:
-            return False
+    # 删除这些重复的函数，因为UnifiedWIMManager已经提供了相应的功能
 
     def on_build_item_double_clicked(self, item):
         """构建列表项双击事件，仿照WIM管理的逻辑"""
@@ -975,89 +791,30 @@ class BuildManagers:
             QMessageBox.critical(self.main_window, "制作ISO错误", f"制作ISO时发生错误: {str(e)}")
 
     def _create_iso_from_build(self, build_dir: Path, iso_path: str, build_method: str) -> tuple[bool, str]:
-        """从构建目录制作ISO"""
+        """从构建目录制作ISO - 使用统一WIM管理器"""
         try:
-            from core.winpe.iso_creator import ISOCreator
             from core.unified_manager import UnifiedWIMManager
 
-            # 创建ISO创建器
-            self.main_window.log_message("🔧 初始化ISO创建器...")
-            iso_creator = ISOCreator(self.config_manager, self.adk_manager)
-            mount_manager = UnifiedWIMManager(self.config_manager, self.adk_manager)
+            # 创建统一WIM管理器
+            self.main_window.log_message("🔧 初始化统一WIM管理器...")
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.main_window)
 
-            if build_method == "copype":
-                # copype模式：直接从构建目录制作ISO（构建目录已包含media子目录）
-                self.main_window.log_message("📋 使用copype模式制作ISO...")
-                # 检查media目录是否存在
-                media_dir = build_dir / "media"
-                if not media_dir.exists():
-                    self.main_window.log_message(f"❌ media目录不存在：{media_dir}")
-                    return False, f"media目录不存在：{media_dir}"
+            self.main_window.log_message(f"📂 构建目录: {build_dir}")
+            self.main_window.log_message(f"📄 ISO输出路径: {iso_path}")
+            self.main_window.log_message(f"📋 构建方法: {build_method}")
 
-                self.main_window.log_message(f"📂 构建目录: {build_dir}")
-                self.main_window.log_message(f"📂 media子目录: {media_dir}")
-                self.main_window.on_build_log("开始制作ISO（copype模式）...")
-                self.main_window.on_build_progress("正在制作ISO...", 30)
+            self.main_window.on_build_log("开始制作ISO...")
+            self.main_window.on_build_progress("正在制作ISO...", 30)
 
-                self.main_window.log_message("🚀 调用ISO创建器...")
-                # 传递构建目录，ISO创建器会自动查找其中的media子目录
-                success, message = iso_creator.create_bootable_iso(build_dir, iso_path)
-                self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
-
-            else:
-                # 传统DISM模式：需要先挂载WIM文件，然后制作ISO
-                self.main_window.log_message("📋 使用DISM模式制作ISO...")
-                wim_path = build_dir / "winpe.wim"
-                if not wim_path.exists():
-                    self.main_window.log_message(f"❌ WIM文件不存在：{wim_path}")
-                    return False, f"WIM文件不存在：{wim_path}"
-
-                self.main_window.log_message(f"📄 WIM文件: {wim_path}")
-                wim_size = wim_path.stat().st_size / (1024 * 1024)
-                self.main_window.log_message(f"📊 WIM文件大小: {wim_size:.1f} MB")
-
-                self.main_window.on_build_log("开始制作ISO（DISM模式）...")
-                self.main_window.on_build_progress("正在挂载WIM文件...", 30)
-
-                # 挂载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
-                self.main_window.log_message("🔌 开始挂载WIM文件...")
-                success, message = mount_manager.mount_wim(wim_path)
-                self.main_window.log_message(f"📊 挂载结果: success={success}, message={message}")
-
-                if not success:
-                    self.main_window.log_message(f"❌ 挂载WIM文件失败：{message}")
-                    return False, f"挂载WIM文件失败：{message}"
-
-                try:
-                    self.main_window.log_message("✅ WIM文件挂载成功")
-                    self.main_window.on_build_progress("正在制作ISO...", 60)
-
-                    # 获取正确的挂载目录路径
-                    actual_mount_dir = wim_path.parent / "mount"
-                    self.main_window.log_message(f"📂 使用挂载目录: {actual_mount_dir}")
-
-                    # 从挂载目录制作ISO
-                    self.main_window.log_message("🚀 从挂载目录制作ISO...")
-                    success, message = iso_creator.create_bootable_iso(actual_mount_dir, iso_path)
-                    self.main_window.log_message(f"📊 ISO创建器返回: success={success}, message={message}")
-
-                finally:
-                    # 卸载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
-                    self.main_window.log_message("🔌 开始卸载WIM文件...")
-                    self.main_window.on_build_progress("正在清理...", 90)
-                    unmount_success, unmount_message = mount_manager.unmount_wim(wim_path, commit=False)
-                    self.main_window.log_message(f"📊 卸载结果: success={unmount_success}, message={unmount_message}")
-                    
-                    if not unmount_success:
-                        self.main_window.log_message(f"⚠️ 卸载WIM文件失败：{unmount_message}")
-                        self.main_window.on_build_log(f"警告：卸载WIM文件失败：{unmount_message}")
-                    else:
-                        self.main_window.log_message("✅ WIM文件卸载成功")
+            # 使用统一管理器创建ISO
+            self.main_window.log_message("🚀 调用统一WIM管理器创建ISO...")
+            success, message = wim_manager.create_iso(build_dir, Path(iso_path))
+            self.main_window.log_message(f"📊 ISO创建结果: success={success}, message={message}")
 
             if success:
                 self.main_window.on_build_progress("ISO制作完成", 100)
                 self.main_window.log_message("✅ ISO制作流程完成")
-                
+
                 # 检查ISO文件
                 iso_file = Path(iso_path)
                 if iso_file.exists():

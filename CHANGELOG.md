@@ -6,6 +6,70 @@ u# 变更日志 (CHANGELOG)
 
 ---
 
+## [0.1.10] - 2025-10-27
+
+### 🚀 新增特性
+- **统一WIM管理系统完全重构**：实现完整的模块化WIM文件管理解决方案
+  - 新增`core.unified_manager`模块，包含5个核心子模块
+  - `PathManager`：统一路径管理和WIM文件查找
+  - `CheckManager`：完整的前置检查机制
+  - `OperationManager`：统一的WIM操作接口
+  - `StatusManager`：状态查询和诊断功能
+  - `WIMManager`：主管理器，整合所有子模块功能
+
+- **智能检查和错误处理系统**：
+  - 挂载前5项安全检查（目录、文件、大小、权限、空间）
+  - 卸载前3项状态检查（挂载状态、文件锁定、进程检查）
+  - ISO创建前6项完整检查
+  - USB制作前4项设备检查
+  - 自动修复功能和详细错误信息
+
+- **高级功能接口**：
+  - `smart_cleanup()`：智能清理挂载状态和临时文件
+  - `quick_mount_check()`：快速挂载状态检查
+  - `get_diagnostics()`：完整的系统诊断信息
+  - `validate_build_structure()`：构建结构验证
+
+### 🔧 改进
+- **UI模块完全重构**：所有WIM相关操作使用统一管理器
+  - `ui/main_window/wim_manager.py`：重写为使用UnifiedWIMManager
+  - `ui/main_window/build_managers.py`：ISO创建功能简化为10行代码
+  - `ui/main_window/usb_thread.py`：新增USB制作线程，使用统一管理器
+  - `ui/main_window/event_handlers.py`：删除149行旧代码，使用新接口
+
+- **代码架构优化**：
+  - 删除重复的WIM操作实现，减少300+行冗余代码
+  - 统一的错误处理和日志记录系统
+  - 模块化设计，便于功能扩展和维护
+  - 完整的类型提示和文档注释
+
+- **样式和体验改进**：
+  - WIM管理器操作日志样式与系统日志统一
+  - 增强的进度显示和状态反馈
+  - 更好的错误提示和用户指导
+
+### 🐛 修复
+- **旧函数引用完全清理**：全项目46个Python文件检查，0个旧函数遗留
+- **模块导入错误修复**：解决所有"No module named 'core.winpe.mount_manager'"问题
+- **内存泄漏修复**：改进WIM操作的资源管理和清理机制
+- **挂载/卸载卡顿问题**：添加超时机制和详细日志记录
+
+### 📚 文档
+- **完整的项目文档**：
+  - `SJ.md`：全面的项目总结和技术文档
+  - `FULL_PROJECT_MIGRATION_REPORT.md`：详细的迁移报告
+  - `UNIFIED_MIGRATION_SUMMARY.md`：统一管理器迁移总结
+  - `CORE_MIGRATION_REPORT.md`：Core模块迁移报告
+
+### 🏗️ 架构
+- **统一WIM管理器架构**：
+  - 分层设计：路径管理 → 检查管理 → 操作管理 → 状态管理
+  - 插件化子模块，便于独立开发和测试
+  - 统一的日志系统集成（终端、文件、系统、构建日志）
+  - 完整的异常安全和错误恢复机制
+
+---
+
 ## [0.1.9] - 2025-10-27
 
 ### 🐛 修复
