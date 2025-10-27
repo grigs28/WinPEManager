@@ -80,7 +80,41 @@ class MountThread(QThread):
             logger.info("开始执行DISM挂载命令")
             self.progress_signal.emit(45)
 
-            success, message = wim_manager.mount_wim(self.build_dir, Path(self.wim_file_path))
+            # 添加超时机制和更详细的日志
+            import threading
+            import time
+            import queue
+            
+            # 使用队列安全的方式执行挂载操作
+            result_queue = queue.Queue()
+            
+            def mount_operation():
+                try:
+                    logger.info("开始调用wim_manager.mount_wim()")
+                    success, message = wim_manager.mount_wim(self.build_dir, Path(self.wim_file_path))
+                    logger.info(f"wim_manager.mount_wim() 返回: success={success}, message='{message}'")
+                    result_queue.put((success, message))
+                except Exception as e:
+                    error_msg = f"挂载操作异常: {str(e)}"
+                    logger.error(error_msg)
+                    import traceback
+                    logger.error(f"异常堆栈: {traceback.format_exc()}")
+                    result_queue.put((False, error_msg))
+            
+            # 启动挂载操作线程
+            mount_thread = threading.Thread(target=mount_operation)
+            mount_thread.daemon = True
+            mount_thread.start()
+            
+            # 等待最多30秒
+            try:
+                success, message = result_queue.get(timeout=30)
+                logger.info(f"从线程获得结果: success={success}, message='{message}'")
+            except queue.Empty:
+                logger.error("挂载操作超时，强制终止")
+                self.progress_signal.emit(100)
+                self.error_signal.emit("挂载操作超时，请检查系统资源或WIM文件完整性")
+                return
             
             # 阶段6: 验证挂载结果 (85%)
             self.progress_signal.emit(85)

@@ -519,51 +519,70 @@ class ADKManager:
             logger.debug(f"DISM路径: {dism_path}")
             logger.debug(f"命令参数: {args}")
 
+            # 添加更详细的日志
+            logger.info(f"开始执行DISM命令，参数: {args}")
+            
             if capture_output:
+                # 使用超时机制和更详细的错误处理
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=False,
-                    timeout=300,  # 5分钟超时
+                    timeout=60,  # 缩短超时时间到60秒，避免长时间阻塞
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 success = result.returncode == 0
 
                 # 使用编码工具处理输出
                 from utils.encoding import safe_decode
-                stdout = safe_decode(result.stdout)
-                stderr = safe_decode(result.stderr)
+                stdout = safe_decode(result.stdout) if result.stdout else ""
+                stderr = safe_decode(result.stderr) if result.stderr else ""
+                
+                # 添加更详细的日志
+                logger.info(f"DISM命令执行完成，返回码: {result.returncode}")
+                if success:
+                    logger.info("DISM命令执行成功")
+                    if stdout:
+                        logger.debug(f"DISM标准输出: {stdout[:200]}...")  # 只记录前200字符
+                else:
+                    logger.error(f"DISM命令执行失败，返回码: {result.returncode}")
+                    logger.error(f"错误输出: {stderr[:200]}...")  # 只记录前200字符
+                    if stdout:
+                        logger.debug(f"标准输出: {stdout[:200]}...")
             else:
+                # 不捕获输出的情况
                 result = subprocess.run(
                     cmd,
-                    timeout=300,  # 5分钟超时
+                    timeout=60,  # 缩短超时时间到60秒
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 success = result.returncode == 0
                 stdout = ""
                 stderr = ""
+                logger.info(f"DISM命令执行完成，返回码: {result.returncode}")
 
             if success:
                 logger.info("DISM命令执行成功")
                 if stdout:
-                    logger.debug(f"DISM输出: {stdout}")
+                    logger.debug(f"DISM输出: {stdout[:200]}...")  # 只记录前200字符
             else:
                 logger.error(f"DISM命令执行失败，返回码: {result.returncode}")
-                logger.error(f"错误输出: {stderr}")
+                logger.error(f"错误输出: {stderr[:200]}...")  # 只记录前200字符
                 if stdout:
-                    logger.debug(f"标准输出: {stdout}")
+                    logger.debug(f"标准输出: {stdout[:200]}...")
                 logger.error(f"执行的命令: {' '.join(cmd)}")
 
             return success, stdout, stderr
 
         except subprocess.TimeoutExpired as e:
-            error_msg = f"DISM命令执行超时 (5分钟): {str(e)}"
+            error_msg = f"DISM命令执行超时 (60秒): {str(e)}"
             logger.error(error_msg)
             logger.error(f"超时的命令: {' '.join(cmd)}")
             return False, "", error_msg
         except Exception as e:
             error_msg = f"执行DISM命令时发生错误: {str(e)}"
             logger.error(error_msg)
+            logger.error(f"错误详情: {repr(e)}")
             return False, "", error_msg
 
     def check_admin_privileges(self) -> bool:
@@ -645,51 +664,70 @@ class ADKManager:
             logger.debug(f"MakeWinPEMedia路径: {makewinpe_path}")
             logger.debug(f"命令参数: {args}")
 
+            # 添加更详细的日志
+            logger.info(f"开始执行MakeWinPEMedia命令，参数: {args}")
+
             if capture_output:
+                # 使用超时机制和更详细的错误处理
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=False,
-                    timeout=600,  # 10分钟超时，ISO创建可能需要更长时间
+                    timeout=120,  # 缩短超时时间到120秒，避免长时间阻塞
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 success = result.returncode == 0
 
                 # 使用编码工具处理输出
                 from utils.encoding import safe_decode
-                stdout = safe_decode(result.stdout)
-                stderr = safe_decode(result.stderr)
+                stdout = safe_decode(result.stdout) if result.stdout else ""
+                stderr = safe_decode(result.stderr) if result.stderr else ""
+                
+                # 添加更详细的日志
+                logger.info(f"MakeWinPEMedia命令执行完成，返回码: {result.returncode}")
+                if success:
+                    logger.info("MakeWinPEMedia命令执行成功")
+                    if stdout:
+                        logger.debug(f"MakeWinPEMedia标准输出: {stdout[:200]}...")  # 只记录前200字符
+                else:
+                    logger.error(f"MakeWinPEMedia命令执行失败，返回码: {result.returncode}")
+                    logger.error(f"错误输出: {stderr[:200]}...")  # 只记录前200字符
+                    if stdout:
+                        logger.debug(f"标准输出: {stdout[:200]}...")
             else:
+                # 不捕获输出的情况
                 result = subprocess.run(
                     cmd,
-                    timeout=600,  # 10分钟超时
+                    timeout=120,  # 缩短超时时间到120秒
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 success = result.returncode == 0
                 stdout = ""
                 stderr = ""
+                logger.info(f"MakeWinPEMedia命令执行完成，返回码: {result.returncode}")
 
             if success:
                 logger.info("MakeWinPEMedia命令执行成功")
                 if stdout:
-                    logger.debug(f"MakeWinPEMedia输出: {stdout}")
+                    logger.debug(f"MakeWinPEMedia输出: {stdout[:200]}...")  # 只记录前200字符
             else:
                 logger.error(f"MakeWinPEMedia命令执行失败，返回码: {result.returncode}")
-                logger.error(f"错误输出: {stderr}")
+                logger.error(f"错误输出: {stderr[:200]}...")  # 只记录前200字符
                 if stdout:
-                    logger.debug(f"标准输出: {stdout}")
+                    logger.debug(f"标准输出: {stdout[:200]}...")
                 logger.error(f"执行的命令: {' '.join(cmd)}")
 
             return success, stdout, stderr
 
         except subprocess.TimeoutExpired as e:
-            error_msg = f"MakeWinPEMedia命令执行超时 (10分钟): {str(e)}"
+            error_msg = f"MakeWinPEMedia命令执行超时 (120秒): {str(e)}"
             logger.error(error_msg)
             logger.error(f"超时的命令: {' '.join(cmd)}")
             return False, "", error_msg
         except Exception as e:
             error_msg = f"执行MakeWinPEMedia命令时发生错误: {str(e)}"
             logger.error(error_msg)
+            logger.error(f"错误详情: {repr(e)}")
             return False, "", error_msg
 
     def get_short_path(self, long_path: str) -> str:

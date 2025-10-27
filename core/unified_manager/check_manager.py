@@ -442,11 +442,36 @@ class CheckManager:
     def _force_cleanup_mount(self, mount_dir: Path) -> Tuple[bool, str]:
         """强制清理挂载目录"""
         try:
+            self.logger.info(f"开始强制清理挂载目录: {mount_dir}")
+
+            # 先尝试普通删除
             if mount_dir.exists():
-                # 尝试正常删除
-                shutil.rmtree(mount_dir, ignore_errors=True)
-                self.logger.info("挂载目录清理成功")
-                return True, "清理成功"
+                try:
+                    import shutil
+                    shutil.rmtree(mount_dir, ignore_errors=True)
+                    self.logger.info(f"挂载目录已删除: {mount_dir}")
+
+                    # 再次检查是否删除成功
+                    if not mount_dir.exists():
+                        return True, "挂载目录已成功清理"
+                    else:
+                        # 如果删除失败，尝试更彻底的方法
+                        self.logger.warning("挂载目录删除不完全，尝试强制清理")
+                        try:
+                            # 尝试删除所有文件
+                            for item in mount_dir.rglob('*'):
+                                if item.is_file():
+                                    item.unlink()
+                                elif item.is_dir():
+                                    item.rmdir()
+                            mount_dir.rmdir()
+                            return True, "挂载目录已成功强制清理"
+                        except Exception as force_e:
+                            self.logger.error(f"强制清理失败: {force_e}")
+                            return False, f"强制清理失败: {str(force_e)}"
+                except Exception as e:
+                    self.logger.error(f"删除挂载目录失败: {e}")
+                    return False, f"删除失败: {str(e)}"
             else:
                 self.logger.info("挂载目录不存在，无需清理")
                 return True, "无需清理"
