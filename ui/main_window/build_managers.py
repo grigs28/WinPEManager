@@ -978,12 +978,12 @@ class BuildManagers:
         """从构建目录制作ISO"""
         try:
             from core.winpe.iso_creator import ISOCreator
-            from core.winpe.mount_manager import MountManager
+            from core.unified_manager import UnifiedWIMManager
 
             # 创建ISO创建器
             self.main_window.log_message("🔧 初始化ISO创建器...")
             iso_creator = ISOCreator(self.config_manager, self.adk_manager)
-            mount_manager = MountManager(self.config_manager, self.adk_manager)
+            mount_manager = UnifiedWIMManager(self.config_manager, self.adk_manager)
 
             if build_method == "copype":
                 # copype模式：直接从构建目录制作ISO（构建目录已包含media子目录）
@@ -1021,7 +1021,7 @@ class BuildManagers:
 
                 # 挂载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
                 self.main_window.log_message("🔌 开始挂载WIM文件...")
-                success, message = mount_manager.mount_winpe_image(wim_path)
+                success, message = mount_manager.mount_wim(wim_path)
                 self.main_window.log_message(f"📊 挂载结果: success={success}, message={message}")
 
                 if not success:
@@ -1045,7 +1045,7 @@ class BuildManagers:
                     # 卸载WIM文件 (使用WIM文件路径，MountManager会自动确定挂载目录)
                     self.main_window.log_message("🔌 开始卸载WIM文件...")
                     self.main_window.on_build_progress("正在清理...", 90)
-                    unmount_success, unmount_message = mount_manager.unmount_winpe_image(wim_path, discard=True)
+                    unmount_success, unmount_message = mount_manager.unmount_wim(wim_path, commit=False)
                     self.main_window.log_message(f"📊 卸载结果: success={unmount_success}, message={unmount_message}")
                     
                     if not unmount_success:

@@ -293,15 +293,23 @@ class LanguageConfig:
                 'enable_winpe_scripting': True
             }
 
-            # copype模式下，WIM文件位于 media/sources/boot.wim
-            wim_file_path = current_build_path / "media" / "sources" / "boot.wim"
-            # 获取挂载路径 (WIM文件所在目录 + /mount)
-            mount_dir = wim_file_path.parent / "mount"
-            if not mount_dir.exists():
+            # 使用统一路径管理器获取WIM文件
+            from core.unified_manager import PathManager
+            path_manager = PathManager()
+            wim_file_path = path_manager.get_primary_wim(current_build_path)
+            
+            if not wim_file_path:
+                logger.warning("未找到WIM文件，跳过WinPE专用设置")
+                return True, "未找到WIM文件，跳过设置"
+            
+            # 获取挂载目录
+            from core.unified_manager import UnifiedWIMManager
+            mount_manager = UnifiedWIMManager(self.config, self.adk)
+            mount_dir = mount_manager.path_manager.get_mount_dir(current_build_path)
+            
+            if not mount_dir.exists() or not any(mount_dir.iterdir()):
                 logger.info("WinPE镜像未挂载，尝试挂载...")
-                from .mount_manager import MountManager
-                mount_manager = MountManager(self.config, self.adk, self.parent_callback)
-                success, message = mount_manager.mount_winpe_image(wim_file_path)
+                success, message = mount_manager.mount_wim(current_build_path, wim_file_path)
                 if not success:
                     logger.warning(f"无法挂载WinPE镜像: {message}")
                     # 继续执行其他设置

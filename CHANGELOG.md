@@ -6,6 +6,43 @@ u# 变更日志 (CHANGELOG)
 
 ---
 
+## [0.1.9] - 2025-10-27
+
+### 🐛 修复
+- **模块导入错误完全修复**：解决所有"No module named 'core.winpe.mount_manager'"错误
+  - 修复ui/main_window/build_managers.py中的mount_manager导入
+  - 修复core/winpe/copype_winxshell.py中的mount_manager导入
+  - 修复core/winpe/language_config.py中的mount_manager导入
+  - 统一替换为core.unified_manager.UnifiedWIMManager
+
+- **MakeWinPEMedia命令参数修复**：修正ISO创建时的参数顺序错误
+  - 错误参数：`MakeWinPEMedia.cmd /New-ISOFile /ISOFile:<ISO路径> /Source:<工作目录>`
+  - 正确参数：`MakeWinPEMedia.cmd /ISO <工作目录> <ISO路径>`
+  - 修复core/unified_manager/operation_manager.py中的参数构建逻辑
+
+- **WIM文件查找和挂载逻辑修复**：解决"未找到WIM文件"问题
+  - 修复core/winpe/language_config.py中WIM文件路径查找逻辑
+  - 使用PathManager.get_primary_wim()自动查找WIM文件
+  - 正确传递构建目录和WIM文件路径给统一挂载管理器
+
+### 🔧 改进
+- **统一管理器集成**：完成所有模块向UnifiedWIMManager的迁移
+  - 统一WIM挂载、卸载、状态检查接口
+  - 标准化路径管理和错误处理
+  - 提高代码一致性和可维护性
+
+- **构建流程稳定性提升**：
+  - 修复copype模式下的ISO创建流程
+  - 改进WIM文件自动检测机制
+  - 增强错误恢复和日志记录
+
+### 📊 修复范围
+- **修复文件数**：4个核心文件
+- **修复方法数**：6个关键方法
+- **解决的问题**：模块导入失败、ISO创建失败、WIM挂载失败等关键问题
+
+---
+
 ## [0.1.8] - 2025-10-26
 
 ### 🐛 修复
@@ -483,4 +520,4 @@ u# 变更日志 (CHANGELOG)
 
 ---
 
-*最后更新: 2025-10-26*
+*最后更新: 2025-10-27*
