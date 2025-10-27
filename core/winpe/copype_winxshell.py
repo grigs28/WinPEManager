@@ -304,6 +304,25 @@ EXEC !"%ProgramFiles%\\WinXShell\\WinXShell_x64.exe" -winpe -desktop -silent -jc
             init_winxshell_ini.write_text(init_content, encoding='utf-8')
             logger.info("📝 InitWinXShell.ini 已创建")
 
+            # 4. 创建退出和隐藏CMD的增强配置
+            # 使用WinXShell管理器统一处理
+            try:
+                from .winxshell_manager import WinXShellManager
+                winxshell_manager = WinXShellManager(self.config, self.adk)
+
+                success, message = winxshell_manager.create_enhanced_startup_config(mount_dir)
+                if ENHANCED_LOGGING_AVAILABLE:
+                    if success:
+                        log_build_step("退出配置", "WinXShell增强配置创建完成")
+                    else:
+                        log_build_step("退出配置", f"WinXShell增强配置创建失败: {message}")
+
+            except ImportError:
+                # 如果导入失败，跳过增强功能
+                logger.warning("WinXShell管理器不可用，跳过增强配置")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("退出配置", "跳过WinXShell增强配置")
+
             # 5. 优化WinXShell.jcfg配置文件
             if ENHANCED_LOGGING_AVAILABLE:
                 log_build_step("WinXShell.jcfg", "生成优化的WinXShell配置文件")
@@ -412,7 +431,24 @@ EXEC !"%ProgramFiles%\\WinXShell\\WinXShell_x64.exe" -winpe -desktop -silent -jc
                 log_build_step("配置完成", "WinXShell启动配置创建完成")
                 log_system_event("WinXShell配置", f"桌面环境: WinXShell, 语言: {language_name}", "info")
 
-            return True, "WinXShell启动配置创建完成"
+            # 4. 创建退出和隐藏CMD的增强配置
+            # 使用WinXShell管理器处理退出和隐藏功能
+            try:
+                from .winxshell_manager import WinXShellManager
+                winxshell_manager = WinXShellManager(self.config, self.adk)
+
+                success, message = winxshell_manager.create_enhanced_startup_config(mount_dir)
+                if ENHANCED_LOGGING_AVAILABLE:
+                    if success:
+                        log_build_step("退出配置", "WinXShell增强配置创建完成")
+                    else:
+                        log_build_step("退出配置", f"WinXShell增强配置创建失败: {message}")
+
+            except ImportError:
+                # 如果导入失败，跳过增强功能
+                logger.warning("WinXShell管理器不可用，跳过增强配置")
+                if ENHANCED_LOGGING_AVAILABLE:
+                    log_build_step("退出配置", "跳过WinXShell增强配置")
 
         except Exception as e:
             error_msg = f"创建WinXShell启动配置失败: {str(e)}"
@@ -608,3 +644,5 @@ EXEC !"%ProgramFiles%\\WinXShell\\WinXShell_x64.exe" -winpe -desktop -silent -jc
             "ru-RU": "Русский"
         }
         return language_map.get(language_code, language_code)
+
+    
