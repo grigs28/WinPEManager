@@ -49,11 +49,11 @@ class BaseImageManager:
             logger.info(f"创建构建目录: {current_build_path}")
 
             # 创建必要的子目录
-            subdirs = ["mount", "drivers", "scripts", "files", "logs"]
+            subdirs = ["mount", "module/drivers", "scripts", "files", "logs"]
             created_dirs = []
             for subdir in subdirs:
                 dir_path = current_build_path / subdir
-                dir_path.mkdir(exist_ok=True)
+                dir_path.mkdir(exist_ok=True, parents=True)
                 if dir_path.exists():
                     created_dirs.append(subdir)
 
@@ -250,10 +250,10 @@ copype工具执行失败！
                 logger.warning(f"⚠️ boot.wim文件较小，可能不完整: {boot_wim_size:.1f} MB")
 
             # 创建额外的必要目录
-            additional_dirs = ["mount", "drivers", "scripts", "files", "logs"]
+            additional_dirs = ["mount", "module/drivers", "scripts", "files", "logs"]
             for subdir in additional_dirs:
                 dir_path = current_build_path / subdir
-                dir_path.mkdir(exist_ok=True)
+                dir_path.mkdir(exist_ok=True, parents=True)
                 logger.debug(f"创建额外目录: {dir_path}")
 
             # 验证Media目录完整性

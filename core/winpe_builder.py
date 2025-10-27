@@ -15,12 +15,11 @@ from core.adk_manager import ADKManager
 from core.config_manager import ConfigManager
 from core.winpe import (
     BaseImageManager,
-    MountManager,
     PackageManager,
-    ISOCreator,
     LanguageConfig,
     BootManager
 )
+from core.unified_manager import UnifiedWIMManager
 from core.winpe.boot_config import BootConfig
 
 # 导入增强的日志功能
@@ -52,12 +51,13 @@ class WinPEBuilder:
 
         # 初始化各个管理器
         self.base_image_manager = BaseImageManager(config_manager, adk_manager, parent_callback)
-        self.mount_manager = MountManager(config_manager, adk_manager, parent_callback)
         self.package_manager = PackageManager(config_manager, adk_manager, parent_callback)
-        self.iso_creator = ISOCreator(config_manager, adk_manager, parent_callback)
         self.language_config = LanguageConfig(config_manager, adk_manager, parent_callback)
         self.boot_manager = BootManager(config_manager, adk_manager, parent_callback)
         self.boot_config = BootConfig(config_manager, adk_manager, parent_callback)
+        
+        # 使用统一WIM管理器替换重复的挂载、卸载、ISO创建功能
+        self.wim_manager = UnifiedWIMManager(config_manager, adk_manager, parent_callback)
 
     def initialize_workspace(self, use_copype: bool = None) -> Tuple[bool, str]:
         """初始化工作空间
@@ -116,10 +116,8 @@ class WinPEBuilder:
             if not self.current_build_path:
                 return False, "工作空间未初始化"
 
-            # 使用挂载管理器挂载镜像
-            # copype模式下，WIM文件位于 media/sources/boot.wim
-            wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
-            return self.mount_manager.mount_winpe_image(wim_file_path)
+            # 使用统一WIM管理器挂载镜像
+            return self.wim_manager.mount_wim(self.current_build_path)
 
         except Exception as e:
             error_msg = f"挂载WinPE镜像失败: {str(e)}"
@@ -199,10 +197,8 @@ class WinPEBuilder:
             if not self.current_build_path:
                 return False, "工作空间未初始化"
 
-            # 使用挂载管理器卸载镜像
-            # copype模式下，WIM文件位于 media/sources/boot.wim
-            wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
-            return self.mount_manager.unmount_winpe_image(wim_file_path, discard)
+            # 使用统一WIM管理器卸载镜像
+            return self.wim_manager.unmount_wim(self.current_build_path, commit=not discard)
 
         except Exception as e:
             error_msg = f"卸载WinPE镜像失败: {str(e)}"
@@ -222,8 +218,8 @@ class WinPEBuilder:
             if not self.current_build_path:
                 return False, "工作空间未初始化"
 
-            # 使用ISO创建器创建ISO
-            return self.iso_creator.create_bootable_iso(self.current_build_path, iso_path)
+            # 使用统一WIM管理器创建ISO
+            return self.wim_manager.create_iso(self.current_build_path, Path(iso_path) if iso_path else None)
 
         except Exception as e:
             error_msg = f"创建ISO失败: {str(e)}"
@@ -489,9 +485,10 @@ class WinPEBuilder:
         """清理构建过程产生的临时文件"""
         try:
             if self.current_build_path and self.current_build_path.exists():
-                # copype模式下，WIM文件位于 media/sources/boot.wim
-                wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
-                self.mount_manager.cleanup_mount_directory(wim_file_path)
+                # 使用统一WIM管理器进行智能清理
+                success, message = self.wim_manager.smart_cleanup(self.current_build_path)
+                if not success:
+                    logger.warning(f"智能清理部分失败: {message}")
         except Exception as e:
             logger.error(f"清理时发生错误: {str(e)}")
 
@@ -512,9 +509,9 @@ class WinPEBuilder:
             }
 
             if self.current_build_path and self.current_build_path.exists():
-                # 检查挂载状态 (需要传递WIM文件路径而不是构建目录)
-                wim_file_path = self.current_build_path / "media" / "sources" / "boot.wim"
-                status["is_mounted"] = self.mount_manager.is_mounted(wim_file_path)
+                # 使用统一WIM管理器检查挂载状态
+                mount_status = self.wim_manager.get_mount_status(self.current_build_path)
+                status["is_mounted"] = mount_status.get("is_mounted", False)
                 
                 # 检查Media目录
                 media_path = self.current_build_path / "media"
@@ -524,10 +521,10 @@ class WinPEBuilder:
                 boot_wim = media_path / "sources" / "boot.wim"
                 status["boot_wim_exists"] = boot_wim.exists()
                 
-                # 检查ISO创建条件
-                iso_ready, missing_items = self.iso_creator.validate_iso_requirements(self.current_build_path)
-                status["iso_ready"] = iso_ready
-                status["missing_for_iso"] = missing_items
+                # 使用统一WIM管理器检查ISO创建条件
+                validation = self.wim_manager.validate_build_structure(self.current_build_path)
+                status["iso_ready"] = validation.get("is_valid", False)
+                status["missing_for_iso"] = validation.get("errors", [])
 
             return status
 
@@ -571,7 +568,9 @@ class WinPEBuilder:
         try:
             if not self.current_build_path:
                 return None
-            return self.iso_creator.estimate_iso_size(self.current_build_path)
+            # 使用统一WIM管理器获取构建信息来估算ISO大小
+            build_info = self.wim_manager.get_build_info(self.current_build_path)
+            return build_info.get("total_wim_size", 0)
         except Exception as e:
             logger.error(f"估算ISO大小时发生错误: {str(e)}")
             return None

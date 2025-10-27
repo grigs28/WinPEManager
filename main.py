@@ -89,8 +89,8 @@ def main():
         )
 
         # 确保必要的目录存在
-        for dir_name in ["logs", "output", "config", "drivers", "scripts", "templates"]:
-            (project_root / dir_name).mkdir(exist_ok=True)
+        for dir_name in ["logs", "output", "config", "module/drivers", "scripts", "templates"]:
+            (project_root / dir_name).mkdir(exist_ok=True, parents=True)
 
         # 记录应用程序启动
         from utils.logger import log_system_event

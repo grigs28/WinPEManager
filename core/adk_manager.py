@@ -600,6 +600,98 @@ class ADKManager:
             "environment_ready": environment_ready,
             "has_admin": self.check_admin_privileges()
         }
+    def get_make_winpe_media_path(self) -> Optional[Path]:
+        """获取MakeWinPEMedia工具路径"""
+        deploy_tools_path = self.get_deployment_tools_path()
+        if not deploy_tools_path:
+            return None
+
+        # 查找MakeWinPEMedia.cmd
+        makewinpe_paths = [
+            deploy_tools_path / "amd64" / "MakeWinPEMedia.cmd",
+            deploy_tools_path / "x86" / "MakeWinPEMedia.cmd"
+        ]
+
+        for makewinpe_path in makewinpe_paths:
+            if makewinpe_path.exists():
+                return makewinpe_path
+
+        # 尝试系统环境变量
+        import shutil
+        system_makewinpe = shutil.which("MakeWinPEMedia.cmd")
+        if system_makewinpe:
+            return Path(system_makewinpe)
+
+        return None
+
+    def run_make_winpe_media_command(self, args: List[str], capture_output: bool = True) -> Tuple[bool, str, str]:
+        """运行MakeWinPEMedia命令
+
+        Args:
+            args: MakeWinPEMedia命令参数
+            capture_output: 是否捕获输出
+
+        Returns:
+            Tuple[bool, str, str]: (成功状态, 标准输出, 错误输出)
+        """
+        makewinpe_path = self.get_make_winpe_media_path()
+        if not makewinpe_path:
+            return False, "", "找不到MakeWinPEMedia工具"
+
+        try:
+            # 构建完整命令
+            cmd = [str(makewinpe_path)] + args
+            logger.info(f"执行MakeWinPEMedia命令: {' '.join(cmd)}")
+            logger.debug(f"MakeWinPEMedia路径: {makewinpe_path}")
+            logger.debug(f"命令参数: {args}")
+
+            if capture_output:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=False,
+                    timeout=600,  # 10分钟超时，ISO创建可能需要更长时间
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                success = result.returncode == 0
+
+                # 使用编码工具处理输出
+                from utils.encoding import safe_decode
+                stdout = safe_decode(result.stdout)
+                stderr = safe_decode(result.stderr)
+            else:
+                result = subprocess.run(
+                    cmd,
+                    timeout=600,  # 10分钟超时
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                success = result.returncode == 0
+                stdout = ""
+                stderr = ""
+
+            if success:
+                logger.info("MakeWinPEMedia命令执行成功")
+                if stdout:
+                    logger.debug(f"MakeWinPEMedia输出: {stdout}")
+            else:
+                logger.error(f"MakeWinPEMedia命令执行失败，返回码: {result.returncode}")
+                logger.error(f"错误输出: {stderr}")
+                if stdout:
+                    logger.debug(f"标准输出: {stdout}")
+                logger.error(f"执行的命令: {' '.join(cmd)}")
+
+            return success, stdout, stderr
+
+        except subprocess.TimeoutExpired as e:
+            error_msg = f"MakeWinPEMedia命令执行超时 (10分钟): {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"超时的命令: {' '.join(cmd)}")
+            return False, "", error_msg
+        except Exception as e:
+            error_msg = f"执行MakeWinPEMedia命令时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, "", error_msg
+
     def get_short_path(self, long_path: str) -> str:
         """获取短文件名路径（8.3格式）以兼容copype"""
         try:

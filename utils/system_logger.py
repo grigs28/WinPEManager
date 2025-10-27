@@ -160,7 +160,7 @@ class BuildLogHandler(logging.Handler):
         super().__init__()
         
         if build_log_path is None:
-            build_log_path = Path.cwd() / "logs" / "build_logs"
+            build_log_path = Path.cwd() / "logs"
         
         self.build_log_path = build_log_path
         self.current_log_file = None

@@ -226,11 +226,13 @@ exit
     def _configure_winxshell_startup(self, mount_dir: Path) -> Tuple[bool, str]:
         """配置WinXShell启动（隐藏cmd.exe窗口）"""
         try:
-            logger.info("配置WinXShell启动设置...")
-            
+            logger.info("🔧 开始配置WinXShell启动设置...")
+            from utils.logger import log_build_step, log_system_event
+
             # 获取语言配置
             language_code = self.config.get("winpe.language", "zh-CN")
             language_name = self._get_language_name(language_code)
+            log_build_step("WinXShell配置", f"语言设置: {language_name} ({language_code})")
             
             # 创建优化的WinXShell启动脚本（完全去掉cmd.exe）
             winxshell_startup = mount_dir / "Windows" / "System32" / "WinXShell.bat"
@@ -262,8 +264,19 @@ if exist "WinXShell_x64.exe" (
     echo 使用配置: X:\\WinXShell\\WinXShell.ini
     echo 语言设置: {language_code}
     
-    rem 启动WinXShell（WinPE模式 + 桌面 + 静默 + 无控制台）
-    start "" /MIN "WinXShell_x64.exe" -winpe -desktop -silent -log="X:\\WinXShell\\debug.log" -jcfg="X:\\WinXShell\\WinXShell.ini"
+    rem 启动WinXShell（基于研究的最优参数组合）
+    echo 使用参数: -winpe -desktop -silent -jcfg
+    echo 这将完全隐藏cmd.exe窗口并启动桌面环境
+
+    rem 优先使用标准WinXShell.exe
+    if exist "WinXShell.exe" (
+        start "" /B "WinXShell.exe" -winpe -desktop -silent -jcfg="X:\\WinXShell\\WinXShell.jcfg"
+    ) else if exist "WinXShell_x64.exe" (
+        start "" /B "WinXShell_x64.exe" -winpe -desktop -silent -jcfg="X:\\WinXShell\\WinXShell.jcfg"
+    ) else (
+        echo 错误: 未找到WinXShell可执行文件
+        exit
+    )
     
     rem 等待WinXShell启动
     timeout /t 3 /nobreak >nul
@@ -293,86 +306,278 @@ if exist "WinXShell_x64.exe" (
 rem 完全退出，不显示任何命令提示符
 exit
 """
-            winxshell_startup.write_text(winxshell_content)
+
+            # 创建WinXShell专用的InitWinXShell.ini（基于现有WIM工作配置）
+            log_build_step("PEConfig目录", "创建PEConfig/Run目录结构")
+            peconfig_run_dir = mount_dir / "Windows" / "System32" / "PEConfig" / "Run"
+            peconfig_run_dir.mkdir(parents=True, exist_ok=True)
+
+            log_build_step("InitWinXShell.ini", "创建WinXShell启动配置文件")
+            init_winxshell_ini = peconfig_run_dir / "InitWinXShell.ini"
+            init_content = f"""EXEC !"%ProgramFiles%\\WinXShell\\WinXShell.exe" -regist -daemon
+EXEC !"%ProgramFiles%\\WinXShell\\WinXShell.exe" -winpe -desktop -silent -jcfg="%ProgramFiles%\\WinXShell\\WinXShell.jcfg"
+"""
+            init_winxshell_ini.write_text(init_content)
+            logger.info("📝 InitWinXShell.ini 配置已写入")
+
+            # 创建RunShell.cmd - 模拟现有WinPE的启动脚本
+            runshell_cmd = peconfig_run_dir / "RunShell.cmd"
+            runshell_content = """@echo off
+rem WinXShell启动脚本
+rem 基于现有WinPE的工作模式
+
+title WinXShell Startup
+echo Starting WinXShell...
+
+rem 设置环境变量
+set USERPROFILE=X:\\Users\\Default
+set APPDATA=X:\\Users\\Default\\AppData\\Roaming
+set LOCALAPPDATA=X:\\Users\\Default\\AppData\\Local
+
+rem 尝试启动WinXShell
+if exist "%ProgramFiles%\\WinXShell\\WinXShell.exe" (
+    echo Found WinXShell at Program Files path
+    "%ProgramFiles%\\WinXShell\\WinXShell.exe" -regist -daemon
+    timeout /t 2 /nobreak >nul
+    "%ProgramFiles%\\WinXShell\\WinXShell.exe" -winpe -desktop -silent -jcfg="%ProgramFiles%\\WinXShell\\WinXShell.jcfg"
+)
+
+rem 检查是否启动成功
+timeout /t 3 /nobreak >nul
+tasklist | findstr /i "winxshell.exe" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo WinXShell started successfully
+) else (
+    echo WinXShell failed to start
+)
+
+rem 退出命令提示符
+exit
+"""
+            runshell_cmd.write_text(runshell_content)
+
+            # 创建简化版的Start.cmd - 直接调用RunShell.cmd
+            start_cmd = peconfig_run_dir / "Start.cmd"
+            start_content = """@echo off
+call "%~dp0\\RunShell.cmd"
+exit
+"""
+            start_cmd.write_text(start_content)
+
+            # 创建WinXShell专用启动脚本（使用VBS隐藏窗口）
+            hidden_winxshell_vbs = mount_dir / "Windows" / "System32" / "hidden_winxshell.vbs"
+            vbs_content = f'''Option Explicit
+Dim objShell, objFSO, strWinXShellPath
+
+Set objShell = CreateObject("WScript.Shell")
+Set objFSO = CreateObject("Scripting.FileSystemObject")
+
+' 检查WinXShell路径
+strWinXShellPath = "%ProgramFiles%\\WinXShell\\WinXShell.exe"
+If Not objFSO.FileExists(objShell.ExpandEnvironmentStrings(strWinXShellPath)) Then
+    strWinXShellPath = "X:\\\\WinXShell\\\\WinXShell.exe"
+    If Not objFSO.FileExists(strWinXShellPath) Then
+        WScript.Quit
+    End If
+End If
+
+' 使用最优参数启动WinXShell（完全隐藏cmd）
+objShell.Run chr(34) & objShell.ExpandEnvironmentStrings(strWinXShellPath) & chr(34) & " -winpe -desktop -silent -jcfg", 0, False
+
+' 等待启动
+WScript.Sleep 2000
+
+WScript.Quit
+'''
+            hidden_winxshell_vbs.write_text(vbs_content)
             
-            # 创建WinXShell专用的winpeshl.ini
+            # 创建完整的PEConfig调用链（基于现有WinPE工作模式）
+            peconfig_dir = mount_dir / "Windows" / "System32" / "PEConfig"
+            peconfig_dir.mkdir(parents=True, exist_ok=True)
+
+            # 创建基于真实发现的Run.cmd脚本
+            log_build_step("Run.cmd", "创建PEConfig主启动脚本")
+            run_cmd = peconfig_dir / "Run.cmd"
+            run_cmd_content = """@echo off
+
+if exist "%~dp0%1\\*.ini" (
+  for /f %%i in ('dir /b "%~dp0%1\\*.ini"') do (
+    echo LOAD "%1\\%%i"
+    start X:\\Windows\\System32\\pecmd.exe LOAD "%~dp0%1\\%%i"
+  )
+)
+
+if exist "%~dp0%1\\*.exe" (
+  for /f %%i in ('dir /b "%~dp0%1\\*.exe"') do (
+    echo run "%1\\%%i"
+    start X:\\Windows\\System32\\pecmd.exe EXEC !"%~dp0%1\\%%i"
+  )
+)
+
+if exist "%~dp0%1\\*.cmd" (
+  for /f %%i in ('dir /b "%~dp0%1\\*.cmd"') do (
+    echo run "%1\\%%i"
+    start X:\\Windows\\System32\\pecmd.exe EXEC !cmd /c "%~dp0%1\\%%i"
+  )
+)
+
+if exist "%~dp0%1\\*.bat" (
+  for /f %%i in ('dir /b "%~dp0%1\\*.bat"') do (
+    echo run "%1\\%%i"
+    start X:\\Windows\\System32\\pecmd.exe EXEC !cmd /c "%~dp0%1\\%%i"
+  )
+)
+"""
+            run_cmd.write_text(run_cmd_content)
+            logger.info("📝 Run.cmd 启动脚本已写入")
+
+            # 不再需要复杂的中间脚本，直接使用pecmd.exe处理
+
+            # 创建WinXShell专用的winpeshl.ini（基于真实发现的工作模式）
+            log_build_step("winpeshl.ini", "创建WinPE启动配置文件")
             winpeshl_ini = mount_dir / "Windows" / "System32" / "winpeshl.ini"
             winpeshl_content = """[LaunchApps]
 %SystemRoot%\\System32\\wpeinit.exe
-%SystemRoot%\\System32\\WinXShell.bat
+%SystemRoot%\\System32\\cmd.exe /c "%SystemRoot%\\System32\\PEConfig\\Run.cmd Run"
 """
             winpeshl_ini.write_text(winpeshl_content)
+            logger.info("📝 winpeshl.ini 启动配置已写入")
             
-            # 创建WinXShell配置文件（针对WinPE优化）
-            winxshell_config_dir = mount_dir / "WinXShell"
-            winxshell_config_dir.mkdir(exist_ok=True)
-            
-            winxshell_config = winxshell_config_dir / "WinXShell.ini"
-            config_content = f"""[WinXShell]
-# WinPE专用配置
-ShellMode=WinPE
-DesktopEnabled=true
-StartMenuEnabled=true
-TaskbarEnabled=true
-ClockEnabled=true
+            # 创建WinXShell配置文件（基于研究的jcfg格式）
+            winxshell_config_dir = mount_dir / "Program Files" / "WinXShell"
+            winxshell_config_dir.mkdir(parents=True, exist_ok=True)
 
-[Language]
-# 语言设置
-Language={language_code}
-LanguageName={language_name}
-Locale={language_code}
-FontName=Microsoft YaHei UI
-FontSize=9
+            # 复制WinXShell程序文件（如果存在）
+            log_build_step("WinXShell程序", "复制WinXShell程序文件")
+            winxshell_source = Path("D:/APP/WinPEManager/Desktop/WinXShell")
+            if winxshell_source.exists():
+                import shutil
+                copied_files = []
+                for exe_file in winxshell_source.glob("*.exe"):
+                    shutil.copy2(exe_file, winxshell_config_dir / exe_file.name)
+                    copied_files.append(exe_file.name)
+                    logger.info(f"📦 复制程序文件: {exe_file.name}")
 
-[Desktop]
-# 桌面设置（WinPE优化）
-IconSize=32
-IconSpacing=75
-ShowComputer=true
-ShowNetwork=true
-ShowRecycleBin=true
+                # 复制配置文件
+                jcfg_source = winxshell_source / "WinXShell.jcfg"
+                if jcfg_source.exists():
+                    shutil.copy2(jcfg_source, winxshell_config_dir / "WinXShell.jcfg")
+                    logger.info("📦 复制配置文件: WinXShell.jcfg")
 
-[Taskbar]
-# 任务栏设置
-Position=Bottom
-AutoHide=false
-ShowQuickLaunch=true
-ShowDesktop=true
+                # 复制所有支持文件
+                for other_file in winxshell_source.glob("*"):
+                    if other_file.is_file() and other_file.suffix.lower() in ['.lua', '.dll', '.ini']:
+                        shutil.copy2(other_file, winxshell_config_dir / other_file.name)
+                        logger.info(f"📦 复制支持文件: {other_file.name}")
 
-[StartMenu]
-# 开始菜单设置
-Style=Classic
-ShowRun=true
-ShowSearch=true
-ShowDocuments=true
-ShowPictures=true
+                log_build_step("文件复制", f"共复制 {len(copied_files)} 个程序文件")
+            else:
+                log_build_step("WinXShell程序", "⚠️ 未找到本地WinXShell文件，将使用默认配置", "warning")
+                logger.warning("⚠️ 未找到本地WinXShell文件目录")
 
-[Performance]
-# 性能设置（WinPE优化）
-AnimationEnabled=false
-TransparencyEnabled=false
-CacheEnabled=true
-MaxMemoryUsage=64
-MaxCacheSize=32
-PluginLoadDelay=1000
-
-[Startup]
-# 启动配置
-LoadDesktop=true
-LoadTaskbar=true
-LoadStartMenu=true
-LoadPlugins=true
-HideCommandLine=true
-SilentMode=true
-
-[Debug]
-# 调试配置
-LogLevel=2
-LogFile=X:\\WinXShell\\debug.log
-VerboseLogging=true
+            # 创建优化的WinXShell.jcfg配置文件
+            winxshell_config = winxshell_config_dir / "WinXShell.jcfg"
+            config_content = f"""{{
+  "JS_README": {{
+    "can_be_omitted_section": true,
+    "description": [
+      "WinPE专用WinXShell配置文件",
+      "基于WinXShell 5.0文档研究优化",
+      "语言设置: {language_name} ({language_code})"
+    ]
+  }},
+  "JS_DAEMON": {{
+    "screen_brightness": 100,
+    "handle_CAPS_double": false,
+    "disable_showdesktop": false
+  }},
+  "JS_DESKTOP": {{
+    "bkcolor": [199, 237, 204],
+    "::WP_MODE": 0,
+    "::WP": "",
+    "iconsize": 32,
+    "3rd_open_arguments": "\\"%s\\"",
+    "cascademenu": {{
+      "#WinXNew": "Directory\\\\Background\\\\shell\\\\WinXNew"
+    }}
+  }},
+  "JS_THEMES": {{
+    "dark": {{
+      "taskbar": {{
+        "bkcolor": [38, 38, 38],
+        "bkmode": "transparent",
+        "transparency": 64,
+        "task_line_color": [238, 238, 238],
+        "textcolor": "0xffffff"
+      }}
+    }}
+  }},
+  "JS_TASKBAR": {{
+    "visible": true,
+    "smallicon": false,
+    "thumbnail": true,
+    "task_close_button": true,
+    "no_task_title": false,
+    "userebar": false,
+    "theme": "dark",
+    "height": 40
+  }},
+  "::STARTMENU": {{
+    "start_pushed_bkcolor": [0, 100, 180],
+    "start_icon": "theme",
+    "notopitems": false,
+    "noprograms": false,
+    "nosettings": false,
+    "nobrowse": false,
+    "noconnections": false,
+    "nofind": false,
+    "norun": false,
+    "nologoff": false,
+    "norestart": false,
+    "noshutdown": false,
+    "noterm": false,
+    "commands": {{
+      "reboot": {{
+        "command": "Wpeutil.exe",
+        "parameters": "Reboot"
+      }},
+      "shutdown": {{
+        "command": "Wpeutil.exe",
+        "parameters": "Shutdown"
+      }}
+    }}
+  }},
+  "::QL": {{
+    "maxiconsinrow": 20,
+    "hide_showdesktop": false,
+    "hide_fileexplorer": false,
+    "hide_fixedsep": false,
+    "hide_usericons": false,
+    "folder": "Microsoft\\\\Internet Explorer\\\\Quick Launch\\\\User Pinned\\\\TaskBar"
+  }},
+  "JS_NOTIFYAREA": {{
+    "hide_toggle_button": false,
+    "hide_showdesktop_button": false
+  }},
+  "JS_NOTIFYCLOCK": {{
+    "visible": true
+  }},
+  "JS_JENV": {{
+    "LANG": "{language_code}",
+    "LANGUAGE": "{language_code}",
+    "LC_ALL": "{language_code}",
+    "USERPROFILE": "X:\\\\Users\\\\Default",
+    "APPDATA": "X:\\\\Users\\\\Default\\\\AppData\\\\Roaming",
+    "LOCALAPPDATA": "X:\\\\Users\\\\Default\\\\AppData\\\\Local"
+  }}
+}}
 """
             winxshell_config.write_text(config_content)
-            
+            logger.info("📝 WinXShell.jcfg 配置文件已生成")
+
+            # 配置完成总结
+            log_build_step("配置完成", "WinXShell启动配置已全部完成")
+            log_system_event("WinXShell配置", f"桌面环境: WinXShell, 语言: {language_name}", "info")
             logger.info("✅ WinXShell启动配置完成")
             return True, "WinXShell启动配置完成"
 

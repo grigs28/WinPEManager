@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from logging.handlers import RotatingFileHandler
 
 # 导入增强的日志处理器
 try:
@@ -73,12 +74,20 @@ class EnhancedLogger:
             self.context_filter = ContextFilter(context or {})
             self.logger.addFilter(self.context_filter)
         
-        # 1. 创建文件处理器
-        file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
+        # 1. 创建文件处理器 - 统一输出到logs/run.log，限制2M
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+        run_log_path = logs_dir / "run.log"
+        file_handler = RotatingFileHandler(
+            run_log_path, 
+            maxBytes=2*1024*1024,  # 2MB
+            backupCount=3, 
+            encoding='utf-8'
+        )
+        file_handler.setLevel(logging.INFO)  # 只记录INFO及以上级别，减少冗余
         file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%H:%M:%S'
         )
         file_handler.setFormatter(file_formatter)
         self.logger.addHandler(file_handler)
@@ -119,14 +128,9 @@ class EnhancedLogger:
             except Exception as e:
                 self.logger.warning(f"启用系统日志失败: {e}")
         
-        # 4. 创建构建日志处理器
+        # 4. 构建日志统一到主日志，不创建独立文件
         if enable_build_log and ENHANCED_LOGGING_AVAILABLE:
-            try:
-                self.build_handler = create_build_logger(build_log_path)
-                self.logger.addHandler(self.build_handler)
-                self.logger.info("构建日志处理器已启用")
-            except Exception as e:
-                self.logger.warning(f"启用构建日志失败: {e}")
+            self.logger.info("构建日志已统一到主日志文件")
         
         self._initialized = True
         self.logger.info("增强日志系统初始化完成")

@@ -734,7 +734,8 @@ class WinPEPackages:
             "WinPE-WMI",           # 基础管理
             "WinPE-PowerShell",     # 自动化
             "WinPE-DismCmdlets",   # 系统管理
-            "WinPE-Scripting",      # 脚本支持
+            "WinPE-Scripting",      # 脚本支持 - WinXShell必须
+            "WinPE-HTA",            # HTML应用支持 - WinXShell UI组件
             "WinPE-WinRE"          # 恢复环境
         ]
 

@@ -46,26 +46,30 @@ class MountThread(QThread):
             # 阶段1: 初始化和准备 (5%)
             self.progress_signal.emit(5)
             
-            # 阶段2: 创建挂载管理器 (15%)
-            from core.winpe.mount_manager import MountManager
+            # 阶段2: 创建统一WIM管理器 (15%)
+            from core.unified_manager import UnifiedWIMManager
             from utils.logger import get_logger
-            mount_manager = MountManager(self.config_manager, self.adk_manager, self.parent)
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
             logger = get_logger("WIMManager")
             self.progress_signal.emit(15)
             
             # 阶段3: 检查挂载状态 (25%)
-            logger.info(f"开始挂载操作，构建目录: {self.build_dir}")
-            
+            logger.info(f"开始挂载操作，WIM文件: {self.wim_file_path}")
+
+            # 使用新的挂载目录逻辑：WIM文件所在目录 + /mount
+            wim_file_path = Path(self.wim_file_path)
+            mount_dir = wim_file_path.parent / "mount"
+            logger.info(f"检查挂载目录: {mount_dir}")
+
             # 检查是否已经挂载
-            mount_dir = self.build_dir / "mount"
             if mount_dir.exists() and list(mount_dir.iterdir()):
-                logger.warning("构建目录已经挂载")
+                logger.warning("WIM文件已经挂载，无需重复挂载")
                 self.progress_signal.emit(100)
-                self.finished_signal.emit(False, "构建目录已经挂载，无需重复挂载")
+                self.finished_signal.emit(False, "WIM文件已经挂载，无需重复挂载")
                 return
-            
+
             self.progress_signal.emit(25)
-            
+
             # 阶段4: 准备挂载环境 (35%)
             logger.info("准备挂载环境")
             if not mount_dir.exists():
@@ -76,7 +80,7 @@ class MountThread(QThread):
             logger.info("开始执行DISM挂载命令")
             self.progress_signal.emit(45)
 
-            success, message = mount_manager.mount_winpe_image(self.wim_file_path)
+            success, message = wim_manager.mount_wim(self.build_dir, Path(self.wim_file_path))
             
             # 阶段6: 验证挂载结果 (85%)
             self.progress_signal.emit(85)
@@ -146,22 +150,25 @@ class UnmountThread(QThread):
             # 阶段1: 初始化和准备 (5%)
             self.progress_signal.emit(5)
             
-            # 阶段2: 创建卸载管理器 (15%)
-            from core.winpe.mount_manager import MountManager
-            mount_manager = MountManager(self.config_manager, self.adk_manager, self.parent)
-            logger.info("MountManager 创建完成")
+            # 阶段2: 创建统一WIM管理器 (15%)
+            from core.unified_manager import UnifiedWIMManager
+            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+            logger.info("UnifiedWIMManager 创建完成")
             self.progress_signal.emit(15)
             
             # 阶段3: 检查挂载状态 (25%)
             logger.info("检查挂载状态")
-            mount_dir = self.build_dir / "mount"
-            
+            # 使用新的挂载目录逻辑：WIM文件所在目录 + /mount
+            wim_file_path = Path(self.wim_file_path)
+            mount_dir = wim_file_path.parent / "mount"
+            logger.info(f"检查挂载目录: {mount_dir}")
+
             if not mount_dir.exists():
-                logger.warning("挂载目录不存在")
+                logger.warning("挂载目录不存在，无需卸载")
                 self.progress_signal.emit(100)
                 self.finished_signal.emit(False, "挂载目录不存在，无需卸载")
                 return
-            
+
             if not list(mount_dir.iterdir()):
                 logger.warning("挂载目录为空，可能已经卸载")
                 self.progress_signal.emit(100)
@@ -180,7 +187,7 @@ class UnmountThread(QThread):
             logger.info("开始执行DISM卸载命令")
             self.progress_signal.emit(45)
             
-            success, message = mount_manager.unmount_winpe_image(self.wim_file_path, discard=not self.commit)
+            success, message = wim_manager.unmount_wim(self.build_dir, commit=self.commit)
             logger.info(f"unmount_winpe_image 返回结果: success={success}, message={message}")
             
             # 阶段6: 验证卸载结果 (85%)
