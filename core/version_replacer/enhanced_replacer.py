@@ -836,7 +836,7 @@ class EnhancedVersionReplacer:
             if output_path.exists():
                 self._log(f"删除已存在的WIN10REPLACED目录: {output_path}", "info")
 
-                # 先尝试卸载可能的挂载点
+                # 先尝试卸载可能的挂载点（失败不影响后续流程）
                 mount_points = [
                     output_path / "mount",
                     output_path / "WinPE" / "mount"
@@ -854,9 +854,9 @@ class EnhancedVersionReplacer:
                             if dism_result[0]:
                                 self._log(f"成功卸载: {mount_point}", "success")
                             else:
-                                self._log(f"卸载失败: {mount_point} - {dism_result[1]}", "warning")
+                                self._log(f"卸载失败，但继续流程: {mount_point} - {dism_result[1]}", "warning")
                         except Exception as e:
-                            self._log(f"卸载异常: {mount_point} - {str(e)}", "warning")
+                            self._log(f"卸载异常，但继续流程: {mount_point} - {str(e)}", "warning")
 
                 # 删除目录
                 shutil.rmtree(output_path, ignore_errors=True)
@@ -866,7 +866,7 @@ class EnhancedVersionReplacer:
             # cd D:\APP\WinPEManager\WinPE_amd64
             # copype amd64 WIN10REPLACED
             parent_dir = output_path.parent  # WinPE_amd64
-            copype_cmd = self.adk.get_copype_command()
+            copype_cmd = self.adk.get_copype_path()
             if not copype_cmd:
                 return False, "找不到copype命令", result
 
