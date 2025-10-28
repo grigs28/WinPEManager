@@ -550,16 +550,24 @@ class EnhancedVersionReplacerWidget(QWidget):
     def init_enhanced_version_replacer(self):
         """初始化增强版版本替换器"""
         try:
-            # 这里需要传入适当的参数
-            # 暂时使用None，实际使用时需要从主窗口获取
+            # 导入必要的模块
+            from core.adk_manager import ADKManager
+            from core.unified_manager.wim_manager import UnifiedWIMManager
+
+            # 初始化ADK管理器
+            adk_manager = ADKManager()
+            unified_wim_manager = UnifiedWIMManager(self.config_manager, adk_manager)
+
             self.enhanced_replacer = EnhancedVersionReplacer(
                 config_manager=self.config_manager,
-                adk_manager=None,  # 需要从主窗口获取
-                unified_wim_manager=None  # 需要从主窗口获取
+                adk_manager=adk_manager,
+                unified_wim_manager=unified_wim_manager
             )
             self.append_log("增强版版本替换器初始化成功", "success")
         except Exception as e:
             self.append_log(f"增强版版本替换器初始化失败: {str(e)}", "error")
+            import traceback
+            traceback.print_exc()
 
     def browse_source_dir(self):
         """浏览源目录"""

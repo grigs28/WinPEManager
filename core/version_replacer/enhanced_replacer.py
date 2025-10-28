@@ -835,6 +835,30 @@ class EnhancedVersionReplacer:
             # 删除已有的WIN10REPLACED目录，让copype直接创建
             if output_path.exists():
                 self._log(f"删除已存在的WIN10REPLACED目录: {output_path}", "info")
+
+                # 先尝试卸载可能的挂载点
+                mount_points = [
+                    output_path / "mount",
+                    output_path / "WinPE" / "mount"
+                ]
+
+                for mount_point in mount_points:
+                    if mount_point.exists():
+                        self._log(f"尝试卸载挂载点: {mount_point}", "info")
+                        try:
+                            # 使用dism卸载
+                            dism_result = self.run_dism_command(
+                                ["/Unmount-Wim", f"/MountDir:{mount_point}", "/Discard"],
+                                "卸载WIM"
+                            )
+                            if dism_result[0]:
+                                self._log(f"成功卸载: {mount_point}", "success")
+                            else:
+                                self._log(f"卸载失败: {mount_point} - {dism_result[1]}", "warning")
+                        except Exception as e:
+                            self._log(f"卸载异常: {mount_point} - {str(e)}", "warning")
+
+                # 删除目录
                 shutil.rmtree(output_path, ignore_errors=True)
 
             # 使用copype命令直接在WinPE_amd64目录中创建WIN10REPLACED

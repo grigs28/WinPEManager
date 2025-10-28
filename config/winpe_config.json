@@ -32,16 +32,5 @@
     "window_geometry": "",
     "window_state": "",
     "recent_projects": []
-  },
-  "version_replace": {
-    "source_dir": "D:/APP/WinPEManager/WinPE_amd64/0WIN11PE",
-    "target_dir": "D:/APP/WinPEManager/WinPE_amd64/0WIN10OLD",
-    "output_dir": "D:/APP/WinPEManager/WinPE_amd64/WIN10REPLACED",
-    "dism_options": {
-      "use_dism": true,
-      "deep_analysis": true,
-      "copy_external": true,
-      "verify_after_copy": true
-    }
   }
 }
