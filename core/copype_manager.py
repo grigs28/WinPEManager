@@ -214,6 +214,11 @@ class CopypeManager:
             final_files = self._count_files(output_path) if output_path.exists() else 0
             elapsed_time = time.time() - start_time
 
+            # 更灵活的成功判断：即使返回码不为0，如果输出目录创建成功且有合理数量的文件，也认为成功
+            if not success and output_path.exists() and final_files > 1000:  # 至少要有1000个文件才算成功
+                self.logger.warning(f"copype返回码非零({return_code})但操作成功，创建了 {final_files} 个文件")
+                success = True
+
             if success:
                 success_msg = f"copype执行成功，创建了 {final_files} 个文件，耗时 {elapsed_time:.2f}秒"
                 self.logger.info(success_msg)
