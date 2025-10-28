@@ -12,7 +12,7 @@ from .version_replacer import (
     ComponentAnalyzer,
     ComponentMigrator,
     VersionReplaceConfig,
-    VersionReplacer,
+    EnhancedVersionReplacer,
     create_version_replace_config
 )
 
@@ -20,6 +20,6 @@ __all__ = [
     'ComponentAnalyzer',
     'ComponentMigrator',
     'VersionReplaceConfig',
-    'VersionReplacer',
+    'EnhancedVersionReplacer',
     'create_version_replace_config'
 ]

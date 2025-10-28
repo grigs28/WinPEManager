@@ -7,15 +7,13 @@ WinPE版本替换模块
 
 from .analyzer import ComponentAnalyzer
 from .migrator import ComponentMigrator
-from .config import VersionReplaceConfig
-from .replacer import VersionReplacer, create_version_replace_config
+from .config import VersionReplaceConfig, create_version_replace_config
 from .enhanced_replacer import EnhancedVersionReplacer
 
 __all__ = [
     'ComponentAnalyzer',
     'ComponentMigrator',
     'VersionReplaceConfig',
-    'VersionReplacer',
     'EnhancedVersionReplacer',
     'create_version_replace_config'
 ]
