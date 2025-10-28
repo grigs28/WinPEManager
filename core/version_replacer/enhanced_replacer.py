@@ -788,18 +788,18 @@ class EnhancedVersionReplacer:
     def execute_enhanced_version_replacement(self, source_dir: str, target_dir: str,
                                            output_dir: str) -> Tuple[bool, str, Dict]:
         """
-        执行增强版版本替换流程
+        执行增强版版本替换流程（使用copype和MakeWinPEMedia模块）
 
         Args:
-            source_dir: 源目录路径
-            target_dir: 目标目录路径
-            output_dir: 输出目录路径
+            source_dir: 源目录路径 (0WIN11PE)
+            target_dir: 目标目录路径 (0WIN10OLD)
+            output_dir: 输出目录路径 (WIN10REPLACED)
 
         Returns:
             Tuple[bool, str, Dict]: (成功状态, 消息, 详细结果)
         """
         try:
-            self._log("开始增强版WinPE版本替换流程", "info")
+            self._log("开始增强版WinPE版本替换流程（使用copype和MakeWinPEMedia）", "info")
             self._update_progress(0, "初始化增强版版本替换...")
 
             # 路径处理
@@ -812,80 +812,136 @@ class EnhancedVersionReplacer:
 
             # 构建WIM文件路径
             source_wim = source_path / "boot" / "boot.wim"
-            target_wim = target_path / "boot" / "boot.wim"
-            output_wim = output_path / "boot" / "boot.wim"
+            target_wim = target_path / "boot.wim"
+            output_wim = output_path / "media" / "sources" / "boot.wim"
 
             # 创建挂载目录
             output_mount = output_path / "mount"
             output_mount.mkdir(parents=True, exist_ok=True)
 
-            # 第一步：使用DISM比较WIM文件
-            self._update_progress(5, "比较源和目标WIM文件...")
-            wim_differences = self.compare_wims_with_dism(str(source_wim), str(target_wim))
-
-            # 第二步：深度分析挂载目录差异
-            self._update_progress(45, "分析挂载目录差异...")
-            if source_path / "mount" and target_path / "mount":
-                mount_differences = self.analyze_mount_differences(
-                    str(source_path / "mount"),
-                    str(target_path / "mount")
-                )
-            else:
-                mount_differences = {"error": "挂载目录不存在"}
-
-            # 第三步：复制目标WIM到输出位置
-            self._update_progress(76, "准备输出WIM文件...")
-            if target_wim.exists():
-                output_wim.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(target_wim, output_wim)
-                self._log("目标WIM文件复制完成", "info")
-            else:
-                return False, "目标WIM文件不存在", {}
-
-            # 第四步：挂载输出WIM
-            self._update_progress(77, "挂载输出WIM文件...")
-            if not self.mount_wim_with_dism(str(output_wim), str(output_mount)):
-                return False, "挂载输出WIM失败", {}
-
-            # 修复WinPE启动路径问题
-            self._update_progress(78, "修复WinPE启动路径...")
-            self.fix_winpe_target_path(str(output_mount))
-
-            # 第五步：复制外部程序
-            self._update_progress(79, "复制外部程序...")
-            external_programs = mount_differences.get("external_programs", [])
-            copy_success = self.copy_external_programs_to_mount(
-                str(source_path / "mount"),
-                str(output_mount),
-                external_programs
-            )
-
-            if not copy_success:
-                self._log("外部程序复制部分失败，继续执行...", "warning")
-
-            # 第六步：复制启动配置和桌面配置
-            self._update_progress(87, "复制配置文件...")
-            self._copy_config_files(str(source_path / "mount"), str(output_mount), mount_differences)
-
-            # 第七步：提交更改并卸载
-            self._update_progress(96, "提交更改并卸载WIM...")
-            if not self.unmount_wim_with_dism(str(output_mount), commit=True):
-                return False, "提交WIM更改失败", {}
-
-            # 生成报告
             result = {
-                "success": True,
+                "success": False,
                 "source_wim": str(source_wim),
                 "target_wim": str(target_wim),
                 "output_wim": str(output_wim),
-                "wim_differences": wim_differences,
-                "mount_differences": mount_differences,
-                "external_programs_copied": len(external_programs),
+                "steps": {},
                 "timestamp": datetime.now().isoformat()
             }
 
-            self._update_progress(100, "增强版版本替换完成")
-            success_msg = f"增强版版本替换完成! 输出WIM: {output_wim}"
+            # 步骤1：使用copype模块构建WIN10REPLACED
+            self._log("步骤1: 使用copype模块构建WIN10REPLACED", "info")
+            self._update_progress(5, "使用copype构建WinPE工作目录...")
+
+            from core.copype_manager import CopypeManager
+            copype_manager = CopypeManager(self.adk, self._update_progress)
+
+            copype_success, message, workspace_path = copype_manager.create_winpe_workspace(
+                "amd64",
+                output_path,
+                progress_callback=self._update_progress
+            )
+
+            if not copype_success:
+                return False, "copype构建WinPE工作目录失败", result
+
+            result["steps"]["copype_build"] = "completed"
+            self._log("步骤1完成: WIN10REPLACED基础结构构建成功", "success")
+
+            # 步骤2：复制0WIN10OLD\boot.wim到WIN10REPLACED\media\sources\boot.wim
+            self._log("步骤2: 复制boot.wim文件", "info")
+            self._update_progress(25, "复制boot.wim文件...")
+
+            if not target_wim.exists():
+                return False, f"目标boot.wim文件不存在: {target_wim}", result
+
+            # 确保目标目录存在
+            output_wim.parent.mkdir(parents=True, exist_ok=True)
+
+            # 复制boot.wim文件
+            shutil.copy2(target_wim, output_wim)
+            self._log("步骤2完成: boot.wim文件复制成功", "success")
+            result["steps"]["boot_wim_copy"] = "completed"
+
+            # 步骤3：挂载WIN10REPLACED\media\sources\boot.wim到WIN10REPLACED\mount
+            self._log("步骤3: 挂载boot.wim文件", "info")
+            self._update_progress(35, "挂载boot.wim到mount目录...")
+
+            mount_success = self.mount_wim_with_dism(str(output_wim), str(output_mount))
+            if not mount_success:
+                return False, "挂载boot.wim失败", result
+
+            self._log("步骤3完成: boot.wim挂载成功", "success")
+            result["steps"]["wim_mount"] = "completed"
+
+            # 步骤4：使用dism命令获取WIN10REPLACED的模块信息
+            self._log("步骤4: 获取WinPE模块信息", "info")
+            self._update_progress(45, "分析WinPE模块...")
+
+            win10replaced_features = self._get_winpe_features(str(output_mount))
+            result["win10replaced_features"] = win10replaced_features
+            result["steps"]["feature_analysis"] = "completed"
+
+            # 步骤5：对比0WIN11PE注册表和manifests找出包差异
+            self._log("步骤5: 对比组件差异", "info")
+            self._update_progress(55, "分析组件差异...")
+
+            # 分析0WIN11PE的注册表和manifests
+            source_mount = source_path / "mount"
+            if not source_mount.exists():
+                return False, f"源挂载目录不存在: {source_mount}", result
+
+            component_differences = self._analyze_component_differences(source_mount, output_mount)
+            result["component_differences"] = component_differences
+            result["steps"]["component_analysis"] = "completed"
+
+            # 步骤6：添加缺失的组件和配置
+            self._log("步骤6: 添加缺失组件和配置", "info")
+            self._update_progress(65, "添加缺失组件...")
+
+            components_added = self._add_missing_components(output_mount, component_differences)
+            result["components_added"] = components_added
+            result["steps"]["component_addition"] = "completed"
+
+            # 步骤7：卸载WIN10REPLACED\mount
+            self._log("步骤7: 卸载挂载点", "info")
+            self._update_progress(85, "卸载WIM挂载点...")
+
+            unmount_success = self.unmount_wim_with_dism(str(output_mount), commit=True)
+            if not unmount_success:
+                return False, "卸载WIM失败", result
+
+            self._log("步骤7完成: WIM卸载成功", "success")
+            result["steps"]["wim_unmount"] = "completed"
+
+            # 步骤8：使用MakeWinPEMedia模块制作ISO
+            self._log("步骤8: 制作ISO文件", "info")
+            self._update_progress(90, "制作ISO镜像...")
+
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self.adk, self._update_progress)
+
+            iso_path = output_path.parent / f"{output_path.name}.iso"
+            iso_success, iso_message = makewinpe_manager.create_winpe_iso(
+                output_path,
+                iso_path,
+                progress_callback=self._update_progress
+            )
+
+            if not iso_success:
+                self._log("ISO制作失败，但boot.wim已完成", "warning")
+                result["iso_created"] = False
+            else:
+                self._log("步骤8完成: ISO制作成功", "success")
+                result["iso_created"] = True
+                result["iso_path"] = str(iso_path)
+
+            result["steps"]["iso_creation"] = "completed"
+            result["success"] = True
+
+            self._update_progress(100, "版本替换流程完成")
+            success_msg = f"版本替换完成! 输出目录: {output_path}"
+            if result.get("iso_created"):
+                success_msg += f", ISO文件: {iso_path}"
             self._log(success_msg, "success")
 
             return True, success_msg, result
@@ -894,6 +950,357 @@ class EnhancedVersionReplacer:
             error_msg = f"增强版版本替换失败: {str(e)}"
             self._log(error_msg, "error")
             return False, error_msg, {}
+
+    def _get_winpe_features(self, mount_dir: str) -> List[Dict]:
+        """
+        使用DISM获取WinPE的模块信息
+
+        Args:
+            mount_dir: 挂载目录路径
+
+        Returns:
+            List[Dict]: 特性信息列表
+        """
+        self._log("获取WinPE特性信息", "info")
+        features = []
+
+        try:
+            # 使用DISM获取所有特性
+            command = [
+                "/Image:" + mount_dir,
+                "/Get-Features",
+                "/Format:Table"
+            ]
+
+            success, output = self.run_dism_command(command, "获取WinPE特性")
+
+            if success:
+                # 解析DISM输出
+                lines = output.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if '|' in line and not line.startswith('Feature Name'):
+                        parts = [p.strip() for p in line.split('|')]
+                        if len(parts) >= 2:
+                            feature_info = {
+                                "name": parts[0],
+                                "state": parts[1] if len(parts) > 1 else "Unknown"
+                            }
+                            features.append(feature_info)
+                            self._log(f"发现特性: {feature_info['name']} - {feature_info['state']}", "info")
+
+            self._log(f"共发现 {len(features)} 个WinPE特性", "info")
+            return features
+
+        except Exception as e:
+            self._log(f"获取WinPE特性失败: {str(e)}", "error")
+            return []
+
+    def _analyze_component_differences(self, source_mount: Path, target_mount: Path) -> Dict:
+        """
+        对比源和目标的组件差异
+
+        Args:
+            source_mount: 源挂载目录 (0WIN11PE\mount)
+            target_mount: 目标挂载目录 (WIN10REPLACED\mount)
+
+        Returns:
+            Dict: 组件差异信息
+        """
+        self._log("分析组件差异", "info")
+        differences = {
+            "missing_features": [],
+            "missing_packages": [],
+            "missing_files": [],
+            "registry_differences": []
+        }
+
+        try:
+            # 分析离线注册表差异
+            self._log("分析注册表差异...", "info")
+            registry_diffs = self._analyze_registry_differences(source_mount, target_mount)
+            differences["registry_differences"] = registry_diffs
+
+            # 分析WinSxS manifests差异
+            self._log("分析WinSxS manifests差异...", "info")
+            manifest_diffs = self._analyze_manifest_differences(source_mount, target_mount)
+            differences["missing_packages"] = manifest_diffs
+
+            # 分析特性差异
+            self._log("分析特性差异...", "info")
+            source_features = self._get_winpe_features(str(source_mount))
+            target_features = self._get_winpe_features(str(target_mount))
+
+            source_feature_names = {f["name"] for f in source_features if f["state"] == "Enabled"}
+            target_feature_names = {f["name"] for f in target_features if f["state"] == "Enabled"}
+
+            missing_features = source_feature_names - target_feature_names
+            differences["missing_features"] = list(missing_features)
+
+            self._log(f"发现 {len(missing_features)} 个缺失特性", "info")
+            return differences
+
+        except Exception as e:
+            self._log(f"分析组件差异失败: {str(e)}", "error")
+            return differences
+
+    def _analyze_registry_differences(self, source_mount: Path, target_mount: Path) -> List[Dict]:
+        """分析注册表差异"""
+        registry_diffs = []
+
+        try:
+            source_software = source_mount / "Windows" / "System32" / "Config" / "SOFTWARE"
+            target_software = target_mount / "Windows" / "System32" / "Config" / "SOFTWARE"
+
+            if source_software.exists() and target_software.exists():
+                # 这里可以添加更详细的注册表分析逻辑
+                # 目前只检查文件是否存在和大小
+                source_size = source_software.stat().st_size
+                target_size = target_software.stat().st_size
+
+                if abs(source_size - target_size) > 1024 * 1024:  # 1MB差异
+                    registry_diffs.append({
+                        "type": "software_hive",
+                        "source_size": source_size,
+                        "target_size": target_size,
+                        "description": "SOFTWARE注册表配置文件大小差异较大"
+                    })
+
+        except Exception as e:
+            self._log(f"分析注册表差异失败: {str(e)}", "warning")
+
+        return registry_diffs
+
+    def _analyze_manifest_differences(self, source_mount: Path, target_mount: Path) -> List[str]:
+        """分析WinSxS manifests差异"""
+        missing_packages = []
+
+        try:
+            source_winxsx = source_mount / "Windows" / "WinSxS" / "Manifests"
+            target_winxsx = target_mount / "Windows" / "WinSxS" / "Manifests"
+
+            if source_winxsx.exists() and target_winxsx.exists():
+                # 获取源目录中的所有manifest文件
+                source_manifests = set()
+                for manifest_file in source_winxsx.glob("*.manifest"):
+                    source_manifests.add(manifest_file.name)
+
+                # 获取目标目录中的所有manifest文件
+                target_manifests = set()
+                if target_winxsx.exists():
+                    for manifest_file in target_winxsx.glob("*.manifest"):
+                        target_manifests.add(manifest_file.name)
+
+                # 找出缺失的manifest文件
+                missing_manifests = source_manifests - target_manifests
+
+                # 过滤出Microsoft相关的包
+                for manifest in missing_manifests:
+                    if "microsoft" in manifest.lower():
+                        missing_packages.append(manifest)
+
+            self._log(f"发现 {len(missing_packages)} 个缺失的Microsoft包", "info")
+
+        except Exception as e:
+            self._log(f"分析manifest差异失败: {str(e)}", "warning")
+
+        return missing_packages
+
+    def _add_missing_components(self, mount_dir: str, component_differences: Dict) -> List[str]:
+        """
+        添加缺失的组件
+
+        Args:
+            mount_dir: 挂载目录
+            component_differences: 组件差异信息
+
+        Returns:
+            List[str]: 已添加的组件列表
+        """
+        self._log("添加缺失组件", "info")
+        added_components = []
+
+        try:
+            # 添加缺失的特性
+            missing_features = component_differences.get("missing_features", [])
+            for feature in missing_features:
+                self._log(f"尝试添加特性: {feature}", "info")
+                success = self.add_component_to_wim("", feature, mount_dir, "feature")
+                if success:
+                    added_components.append(f"Feature: {feature}")
+                    self._log(f"特性添加成功: {feature}", "success")
+                else:
+                    self._log(f"特性添加失败: {feature}", "warning")
+
+            # 添加外部程序和配置
+            self._log("添加外部程序和配置...", "info")
+            external_added = self._copy_external_programs_from_source(mount_dir, source_mount)
+            added_components.extend(external_added)
+
+            # 复制WinXShell相关配置
+            self._log("复制WinXShell配置...", "info")
+            winxshell_added = self._copy_winxshell_config(mount_dir, source_mount)
+            added_components.extend(winxshell_added)
+
+            self._log(f"共添加 {len(added_components)} 个组件", "info")
+
+        except Exception as e:
+            self._log(f"添加缺失组件失败: {str(e)}", "error")
+
+        return added_components
+
+    def _copy_external_programs_from_source(self, target_mount: str, source_mount: str) -> List[str]:
+        """
+        从源挂载目录复制外部程序到目标挂载目录
+
+        Args:
+            target_mount: 目标挂载目录 (WIN10REPLACED\mount)
+            source_mount: 源挂载目录 (0WIN11PE\mount)
+
+        Returns:
+            List[str]: 已复制的外部程序列表
+        """
+        self._log("复制外部程序", "info")
+        copied_programs = []
+
+        try:
+            target_path = Path(target_mount)
+            source_path = Path(source_mount)
+
+            # 外部程序目录列表
+            external_dirs = [
+                "Program Files/WinXShell",
+                "Program Files/CairoShell",
+                "Program Files/Explorer",
+                "Windows/System32/Programs",
+                "Windows/System32/PEConfig",
+                "Windows/System32/startup"
+            ]
+
+            for external_dir in external_dirs:
+                source_dir = source_path / external_dir
+                target_dir = target_path / external_dir
+
+                if source_dir.exists():
+                    self._log(f"复制外部程序目录: {external_dir}", "info")
+                    try:
+                        # 确保目标父目录存在
+                        target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+                        if source_dir.is_dir():
+                            # 复制整个目录
+                            if target_dir.exists():
+                                shutil.rmtree(target_dir, ignore_errors=True)
+                            shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+                            copied_programs.append(f"Directory: {external_dir}")
+                            self._log(f"外部程序目录复制成功: {external_dir}", "success")
+                        elif source_dir.is_file():
+                            # 复制文件
+                            target_dir.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(source_dir, target_dir)
+                            copied_programs.append(f"File: {external_dir}")
+                            self._log(f"外部程序文件复制成功: {external_dir}", "success")
+
+                    except Exception as e:
+                        self._log(f"复制外部程序失败: {external_dir} - {str(e)}", "error")
+
+            self._log(f"共复制 {len(copied_programs)} 个外部程序", "info")
+            return copied_programs
+
+        except Exception as e:
+            self._log(f"复制外部程序失败: {str(e)}", "error")
+            return []
+
+    def _copy_winxshell_config(self, target_mount: str, source_mount: str) -> List[str]:
+        """
+        复制WinXShell相关配置
+
+        Args:
+            target_mount: 目标挂载目录 (WIN10REPLACED\mount)
+            source_mount: 源挂载目录 (0WIN11PE\mount)
+
+        Returns:
+            List[str]: 已复制的配置列表
+        """
+        self._log("复制WinXShell配置", "info")
+        copied_configs = []
+
+        try:
+            target_path = Path(target_mount)
+            source_path = Path(source_mount)
+
+            # WinXShell相关配置文件
+            winxshell_configs = [
+                "Windows/System32/winpeshl.ini",
+                "Windows/System32/startnet.cmd",
+                "Windows/System32/PEConfig/Run.cmd",
+                "Windows/System32/PEConfig/LoadPETools.cmd"
+            ]
+
+            for config_file in winxshell_configs:
+                source_file = source_path / config_file
+                target_file = target_path / config_file
+
+                if source_file.exists():
+                    try:
+                        # 确保目标目录存在
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+
+                        # 复制配置文件
+                        shutil.copy2(source_file, target_file)
+                        copied_configs.append(config_file)
+                        self._log(f"WinXShell配置复制成功: {config_file}", "success")
+
+                    except Exception as e:
+                        self._log(f"复制WinXShell配置失败: {config_file} - {str(e)}", "error")
+
+            # 复制WinXShell主程序和配置目录
+            winxshell_program_dir = source_path / "Program Files/WinXShell"
+            if winxshell_program_dir.exists():
+                target_winxshell_dir = target_path / "Program Files/WinXShell"
+                try:
+                    target_winxshell_dir.parent.mkdir(parents=True, exist_ok=True)
+                    if target_winxshell_dir.exists():
+                        shutil.rmtree(target_winxshell_dir, ignore_errors=True)
+                    shutil.copytree(winxshell_program_dir, target_winxshell_dir, dirs_exist_ok=True)
+                    copied_configs.append("Program Files/WinXShell")
+                    self._log("WinXShell程序目录复制成功", "success")
+
+                    # 处理WinXShell的自启动配置
+                    self._setup_winxshell_autostart(target_path)
+
+                except Exception as e:
+                    self._log(f"复制WinXShell程序目录失败: {str(e)}", "error")
+
+            self._log(f"共复制 {len(copied_configs)} 个WinXShell配置", "info")
+            return copied_configs
+
+        except Exception as e:
+            self._log(f"复制WinXShell配置失败: {str(e)}", "error")
+            return []
+
+    def _setup_winxshell_autostart(self, mount_path: Path):
+        """设置WinXShell自启动配置"""
+        try:
+            # 创建或修改winpeshl.ini配置
+            winpeshl_ini = mount_path / "Windows" / "System32" / "winpeshl.ini"
+
+            winpeshl_content = """[LaunchApps]
+%windir%\\System32\\winpeshl.exe
+%windir%\\Program Files\\WinXShell\\WinXShell.exe
+"""
+
+            try:
+                winpeshl_ini.parent.mkdir(parents=True, exist_ok=True)
+                with open(winpeshl_ini, 'w', encoding='utf-8') as f:
+                    f.write(winpeshl_content)
+                self._log("WinXShell自启动配置设置成功", "success")
+
+            except Exception as e:
+                self._log(f"设置WinXShell自启动配置失败: {str(e)}", "error")
+
+        except Exception as e:
+            self._log(f"WinXShell自启动设置失败: {str(e)}", "error")
 
     def _copy_config_files(self, source_mount: str, target_mount: str, mount_differences: Dict):
         """复制配置文件"""
