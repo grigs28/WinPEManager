@@ -4,7 +4,19 @@
       "WebSearch",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(dir:*)",
+      "Bash(cmd:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)",
+      "Bash(timeout 10 python:*)",
+      "Bash(find:*)",
+      "Bash(for:*)",
+      "Bash(do)",
+      "Bash(done)",
+      "Read(//c/Program Files (x86)/Windows Kits/10/Assessment and Deployment Kit/Deployment Tools/amd64/Oscdimg/**)",
+      "Read(//c/Program Files (x86)/Windows Kits/10/**)"
     ],
     "deny": [],
     "ask": []

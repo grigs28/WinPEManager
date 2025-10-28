@@ -295,30 +295,19 @@ class OperationManager:
             start_build_session(build_info)
             
             try:
-                # 使用ADK管理器直接创建ISO
-                self.logger.info("使用ADK管理器创建ISO文件")
-                
-                # 构建MakeWinPEMedia命令
-                # 正确的参数顺序: MakeWinPEMedia.cmd /ISO <工作目录> <ISO路径>
-                iso_path_str = str(iso_path)
-                build_dir_str = str(build_dir)
-                
-                args = [
-                    "/ISO",
-                    build_dir_str,
-                    iso_path_str
-                ]
-                
+                # 使用ADK管理器的oscdimg工具直接创建ISO
+                self.logger.info("使用oscdimg工具创建ISO文件")
+
                 # 记录命令
-                log_command(" ".join(args), "创建ISO文件")
-                
-                # 执行MakeWinPEMedia命令
-                self.logger.info("执行MakeWinPEMedia命令...")
+                log_command(f"oscdimg {build_dir} -> {iso_path}", "创建ISO文件")
+
+                # 执行oscdimg命令
+                self.logger.info("执行oscdimg命令...")
                 if iso_path.exists():
                     self.logger.info(f"目标ISO文件已存在: {iso_path}")
                     self.logger.info("将自动覆盖现有ISO文件")
 
-                success, stdout, stderr = self.adk.run_make_winpe_media_command(args)
+                success, stdout, stderr = self.adk.create_iso_with_oscdimg(build_dir, iso_path)
                 
                 if success:
                     self.logger.info("✅ ISO文件创建成功")
@@ -333,7 +322,7 @@ class OperationManager:
                     end_build_session(True, f"ISO创建成功: {iso_path}")
                     return True, f"ISO文件创建成功: {iso_path}"
                 else:
-                    error_msg = f"MakeWinPEMedia命令失败: {stderr}"
+                    error_msg = f"oscdimg命令失败: {stderr}"
                     self.logger.error(error_msg)
                     log_system_event("ISO创建失败", error_msg, "error")
                     end_build_session(False, error_msg)

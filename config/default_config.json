@@ -33,6 +33,25 @@
     "window_state": "",
     "recent_projects": []
   },
+  "version_replace": {
+    "source_dir": "",
+    "target_dir": "",
+    "output_dir": "",
+    "source_wim": "",
+    "target_wim": "",
+    "output_wim": "",
+    "mount_dir": "",
+    "migrate_options": {
+      "startup_scripts": true,
+      "winxshell_config": true,
+      "desktop_environment": true,
+      "drivers": true,
+      "custom_components": true
+    },
+    "recent_configs": [],
+    "auto_save_config": true,
+    "auto_load_config": true
+  },
   "advanced": {
     "dism": {
       "custom_path": "",

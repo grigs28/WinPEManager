@@ -209,15 +209,48 @@ class DesktopConfigDialog(QDialog):
         
         layout.addWidget(appearance_group)
         
+        # WinXShell 语言配置
+        winxshell_lang_group = QGroupBox("WinXShell 语言设置")
+        winxshell_lang_layout = QFormLayout(winxshell_lang_group)
+
+        self.winxshell_language_combo = QComboBox()
+        # 添加 WinXShell 支持的语言选项
+        winxshell_languages = [
+            {"code": "zh-CN", "name": "简体中文"},
+            {"code": "zh-TW", "name": "繁體中文"},
+            {"code": "en-US", "name": "English"},
+            {"code": "ja-JP", "name": "日本語"},
+            {"code": "ko-KR", "name": "한국어"},
+            {"code": "fr-FR", "name": "Français"},
+            {"code": "de-DE", "name": "Deutsch"},
+            {"code": "es-ES", "name": "Español"},
+            {"code": "ru-RU", "name": "Русский"},
+            {"code": "it-IT", "name": "Italiano"},
+            {"code": "pt-BR", "name": "Português"},
+            {"code": "ar-SA", "name": "العربية"}
+        ]
+
+        for lang in winxshell_languages:
+            self.winxshell_language_combo.addItem(lang["name"], lang["code"])
+
+        winxshell_lang_layout.addRow("WinXShell 语言:", self.winxshell_language_combo)
+
+        # WinXShell 语言说明
+        winxshell_lang_help = QLabel("说明：WinXShell 的界面显示语言，默认为简体中文")
+        winxshell_lang_help.setStyleSheet("color: #666; font-size: 11px; margin-top: 5px;")
+        winxshell_lang_layout.addRow("", winxshell_lang_help)
+
+        layout.addWidget(winxshell_lang_group)
+
         # 自定义参数
         custom_group = QGroupBox("自定义参数")
         custom_layout = QVBoxLayout(custom_group)
-        
+
         self.custom_params_edit = QTextEdit()
         self.custom_params_edit.setMaximumHeight(100)
         self.custom_params_edit.setPlaceholderText("输入自定义启动参数，每行一个...")
         custom_layout.addWidget(self.custom_params_edit)
-        
+
         layout.addWidget(custom_group)
         
         self.tab_widget.addTab(widget, "高级配置")
@@ -323,7 +356,14 @@ class DesktopConfigDialog(QDialog):
             if isinstance(custom_params, list):
                 custom_params = "\n".join(custom_params)
             self.custom_params_edit.setPlainText(custom_params)
-            
+
+            # WinXShell 语言配置
+            winxshell_lang = self.config_manager.get("winpe.winxshell_language", "zh-CN")
+            for i in range(self.winxshell_language_combo.count()):
+                if self.winxshell_language_combo.itemData(i) == winxshell_lang:
+                    self.winxshell_language_combo.setCurrentIndex(i)
+                    break
+
             # 更新下载信息和状态
             self.update_download_info()
             self.update_status_info()
@@ -365,7 +405,11 @@ class DesktopConfigDialog(QDialog):
             else:
                 custom_params = []
             self.config_manager.set("winpe.desktop_custom_params", custom_params)
-            
+
+            # WinXShell 语言配置
+            winxshell_lang = self.winxshell_language_combo.currentData()
+            self.config_manager.set("winpe.winxshell_language", winxshell_lang)
+
             # 保存配置
             self.config_manager.save_config()
             
@@ -402,7 +446,13 @@ class DesktopConfigDialog(QDialog):
                 self.animation_check.setChecked(True)
                 self.transparency_check.setChecked(True)
                 self.custom_params_edit.clear()
-                
+
+                # 重置 WinXShell 语言为默认简体中文
+                for i in range(self.winxshell_language_combo.count()):
+                    if self.winxshell_language_combo.itemData(i) == "zh-CN":
+                        self.winxshell_language_combo.setCurrentIndex(i)
+                        break
+
                 QMessageBox.information(self, "成功", "配置已重置为默认值！")
                 
         except Exception as e:

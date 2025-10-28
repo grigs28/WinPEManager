@@ -272,7 +272,7 @@ if exist "WinXShell_x64.exe" (
     if exist "WinXShell.exe" (
         start "" /B "WinXShell.exe" -winpe -desktop -silent -jcfg="X:\\WinXShell\\WinXShell.jcfg"
     ) else if exist "WinXShell_x64.exe" (
-        start "" /B "WinXShell_x64.exe" -winpe -desktop -silent -jcfg="X:\\WinXShell\\WinXShell.jcfg"
+        start "" /B "WinXShell_x64.exe" -winpe -desktop -silent -jcfg="X:\\WinXShell\\WinXShell.jcfg" -lang zh-CN
     ) else (
         echo 错误: 未找到WinXShell可执行文件
         exit

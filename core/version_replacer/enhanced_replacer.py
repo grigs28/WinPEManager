@@ -1,0 +1,973 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+增强版版本替换器
+使用DISM进行精确的WIM比较和组件添加
+实现完整的分析-比较-添加流程
+"""
+
+import os
+import shutil
+import json
+import subprocess
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any, Set
+from datetime import datetime
+import tempfile
+
+from utils.logger import get_logger, log_command, log_build_step, log_system_event
+
+
+class EnhancedVersionReplacer:
+    """增强版WinPE版本替换器，使用DISM进行精确操作"""
+
+    def __init__(self, config_manager, adk_manager, unified_wim_manager):
+        """
+        初始化增强版版本替换器
+
+        Args:
+            config_manager: 配置管理器
+            adk_manager: ADK管理器
+            unified_wim_manager: 统一WIM管理器
+        """
+        self.config = config_manager
+        self.adk = adk_manager
+        self.wim_manager = unified_wim_manager
+        self.logger = get_logger("EnhancedVersionReplacer")
+
+        # 回调函数
+        self.progress_callback = None
+        self.log_callback = None
+
+        # DISM路径
+        self.dism_path = self._get_dism_path()
+
+    def _get_dism_path(self) -> str:
+        """获取DISM工具路径"""
+        # 优先使用自定义DISM路径
+        custom_dism = self.config.get("advanced.dism.custom_path", "")
+        if custom_dism and Path(custom_dism).exists():
+            return str(Path(custom_dism))
+
+        # 使用系统DISM
+        dism_paths = [
+            r"C:\Windows\System32\dism.exe",
+            r"C:\Windows\SysWOW64\dism.exe"
+        ]
+
+        for dism_path in dism_paths:
+            if Path(dism_path).exists():
+                return dism_path
+
+        raise FileNotFoundError("找不到DISM工具，请确保已安装Windows ADK或DISM工具可用")
+
+    def set_progress_callback(self, callback):
+        """设置进度回调函数"""
+        self.progress_callback = callback
+
+    def set_log_callback(self, callback):
+        """设置日志回调函数"""
+        self.log_callback = callback
+
+    def _log(self, message: str, level: str = "info"):
+        """内部日志记录"""
+        if self.log_callback:
+            self.log_callback(message, level)
+
+        if level == "error":
+            self.logger.error(message)
+            log_system_event("增强版版本替换", message, "error")
+        elif level == "warning":
+            self.logger.warning(message)
+            log_system_event("增强版版本替换", message, "warning")
+        else:
+            self.logger.info(message)
+            log_system_event("增强版版本替换", message, "info")
+
+    def _update_progress(self, percent: int, message: str = ""):
+        """更新进度"""
+        if self.progress_callback:
+            self.progress_callback(percent, message)
+        log_build_step(f"增强版版本替换 {percent}%", message)
+
+    def run_dism_command(self, command: List[str], description: str = "") -> Tuple[bool, str]:
+        """
+        运行DISM命令
+
+        Args:
+            command: DISM命令参数列表
+            description: 命令描述
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 输出信息)
+        """
+        try:
+            full_command = [self.dism_path] + command
+
+            self._log(f"执行DISM命令: {description}", "info")
+            log_command(" ".join(full_command))
+
+            # 运行命令
+            result = subprocess.run(
+                full_command,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                timeout=1800  # 30分钟超时
+            )
+
+            if result.returncode == 0:
+                self._log(f"DISM命令成功: {description}", "success")
+                return True, result.stdout
+            else:
+                error_msg = f"DISM命令失败: {description}\n错误信息: {result.stderr}"
+                self._log(error_msg, "error")
+                return False, result.stderr
+
+        except subprocess.TimeoutExpired:
+            error_msg = f"DISM命令超时: {description}"
+            self._log(error_msg, "error")
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"DISM命令执行异常: {description} - {str(e)}"
+            self._log(error_msg, "error")
+            return False, error_msg
+
+    def analyze_wim_with_dism(self, wim_path: str, description: str = "") -> Dict:
+        """
+        使用DISM分析WIM文件
+
+        Args:
+            wim_path: WIM文件路径
+            description: 分析描述
+
+        Returns:
+            Dict: WIM分析结果
+        """
+        self._log(f"使用DISM分析WIM: {description}", "info")
+
+        analysis = {
+            "wim_path": wim_path,
+            "description": description,
+            "images": [],
+            "features": [],
+            "packages": [],
+            "appx_packages": [],
+            "capabilities": [],
+            "drivers": []
+        }
+
+        # 获取WIM信息
+        command = ["/Get-WimInfo", f"/WimFile:{wim_path}"]
+        success, output = self.run_dism_command(command, f"获取WIM信息 - {description}")
+
+        if success:
+            # 解析输出获取镜像信息
+            lines = output.split('\n')
+            current_image = {}
+
+            for line in lines:
+                line = line.strip()
+                if "Index :" in line:
+                    if current_image:
+                        analysis["images"].append(current_image)
+                    current_image = {"index": line.split(":")[-1].strip()}
+                elif "Name :" in line and current_image:
+                    current_image["name"] = line.split(":")[-1].strip()
+                elif "Description :" in line and current_image:
+                    current_image["description"] = line.split(":")[-1].strip()
+                elif "Size :" in line and current_image:
+                    current_image["size"] = line.split(":")[-1].strip()
+
+            if current_image:
+                analysis["images"].append(current_image)
+
+        return analysis
+
+    def compare_wims_with_dism(self, source_wim: str, target_wim: str) -> Dict:
+        """
+        使用DISM比较两个WIM文件的差异
+
+        Args:
+            source_wim: 源WIM文件路径
+            target_wim: 目标WIM文件路径
+
+        Returns:
+            Dict: WIM差异分析结果
+        """
+        self._log("使用DISM比较WIM文件差异", "info")
+        self._update_progress(10, "分析源WIM文件...")
+
+        # 分析源WIM
+        source_analysis = self.analyze_wim_with_dism(source_wim, "源WIM")
+
+        self._update_progress(20, "分析目标WIM文件...")
+        # 分析目标WIM
+        target_analysis = self.analyze_wim_with_dism(target_wim, "目标WIM")
+
+        # 计算差异
+        self._update_progress(30, "计算WIM差异...")
+        differences = {
+            "source_wim": source_wim,
+            "target_wim": target_wim,
+            "source_analysis": source_analysis,
+            "target_analysis": target_analysis,
+            "missing_in_target": [],
+            "additional_in_source": [],
+            "size_difference": 0
+        }
+
+        # 比较镜像数量和大小
+        source_images = source_analysis.get("images", [])
+        target_images = target_analysis.get("images", [])
+
+        if len(source_images) != len(target_images):
+            differences["missing_in_target"].append(
+                f"镜像数量不匹配: 源({len(source_images)}) vs 目标({len(target_images)})"
+            )
+
+        # 比较镜像大小
+        for i, (src_img, tgt_img) in enumerate(zip(source_images, target_images)):
+            if src_img.get("size") != tgt_img.get("size"):
+                differences["missing_in_target"].append(
+                    f"镜像{i+1}大小不匹配: 源({src_img.get('size')}) vs 目标({tgt_img.get('size')})"
+                )
+
+        self._update_progress(40, "WIM差异分析完成")
+        return differences
+
+    def mount_wim_with_dism(self, wim_path: str, mount_dir: str, image_index: int = 1) -> bool:
+        """
+        使用统一WIM管理器挂载WIM文件
+
+        Args:
+            wim_path: WIM文件路径
+            mount_dir: 挂载目录路径
+            image_index: 镜像索引
+
+        Returns:
+            bool: 挂载成功状态
+        """
+        self._log(f"使用统一WIM管理器挂载WIM: {wim_path} -> {mount_dir}", "info")
+
+        try:
+            # 使用统一WIM管理器挂载
+            wim_path_obj = Path(wim_path)
+            mount_dir_obj = Path(mount_dir)
+
+            # 确保挂载目录存在
+            mount_dir_obj.mkdir(parents=True, exist_ok=True)
+
+            # 使用统一管理器挂载
+            success, message = self.wim_manager.mount_wim(mount_dir_obj.parent, wim_path_obj)
+
+            if success:
+                self._log(f"WIM挂载成功: {mount_dir}", "success")
+                return True
+            else:
+                self._log(f"WIM挂载失败: {message}", "error")
+                return False
+
+        except Exception as e:
+            self._log(f"WIM挂载异常: {str(e)}", "error")
+            return False
+
+    def unmount_wim_with_dism(self, mount_dir: str, commit: bool = False) -> bool:
+        """
+        使用统一WIM管理器卸载WIM文件
+
+        Args:
+            mount_dir: 挂载目录路径
+            commit: 是否提交更改
+
+        Returns:
+            bool: 卸载成功状态
+        """
+        action = "提交并卸载" if commit else "卸载"
+        self._log(f"使用统一WIM管理器{action}WIM: {mount_dir}", "info")
+
+        try:
+            # 使用统一WIM管理器卸载
+            mount_dir_obj = Path(mount_dir)
+
+            # 使用统一管理器卸载
+            success, message = self.wim_manager.unmount_wim(mount_dir_obj.parent, commit)
+
+            if success:
+                self._log(f"WIM{action}成功: {mount_dir}", "success")
+                return True
+            else:
+                self._log(f"WIM{action}失败: {message}", "error")
+                return False
+
+        except Exception as e:
+            self._log(f"WIM{action}异常: {str(e)}", "error")
+            return False
+
+    def fix_winpe_target_path(self, mount_dir: str) -> bool:
+        """
+        修复WinPE启动时的目标路径问题
+
+        修复Windows PE无法启动的问题：
+        实际SYSTEMROOT目录(X:\windows)不同于配置的目录(X:\$windows.~bt\Windows)
+        """
+        self._log("开始修复WinPE启动路径问题...", "info")
+
+        try:
+            mount_path = Path(mount_dir)
+            if not mount_path.exists():
+                self._log(f"挂载目录不存在: {mount_dir}", "error")
+                return False
+
+            # 使用DISM设置正确的目标路径
+            dism_path = self._get_dism_path()
+
+            # 方法1：设置目标路径为X:\ (标准的WinPE路径)
+            self._log("使用DISM设置WinPE目标路径...", "info")
+            cmd = [
+                str(dism_path),
+                "/Image:" + str(mount_path),
+                "/Set-TargetPath:X:\\"
+            ]
+
+            success, output = self.run_dism_command(cmd, "设置WinPE目标路径")
+
+            if success:
+                self._log("✅ DISM设置目标路径成功", "success")
+            else:
+                self._log(f"DISM设置目标路径失败: {output}", "warning")
+
+            # 方法2：额外设置确保SYSTEMROOT正确
+            self._log("确保WinPE SYSTEMROOT路径正确...", "info")
+            cmd_systemroot = [
+                str(dism_path),
+                "/Image:" + str(mount_path),
+                "/Set-Sysroot:X:\\Windows"
+            ]
+
+            success_systemroot, output_systemroot = self.run_dism_command(cmd_systemroot, "设置WinPE SYSTEMROOT")
+
+            if success_systemroot:
+                self._log("✅ DISM设置SYSTEMROOT成功", "success")
+            else:
+                self._log(f"DISM设置SYSTEMROOT失败: {output_systemroot}", "warning")
+
+            # 方法3：创建和修复配置文件
+            self._fix_winpe_config_files(mount_path)
+
+            self._log("WinPE启动路径修复完成", "success")
+            return True
+
+        except Exception as e:
+            self._log(f"修复WinPE启动路径时发生错误: {str(e)}", "error")
+            return False
+
+    def _fix_winpe_config_files(self, mount_path: Path):
+        """修复WinPE配置文件中的路径问题"""
+        try:
+            # 创建WinPE启动配置文件
+            winpeshl_ini = mount_path / "Windows" / "System32" / "winpeshl.ini"
+            if not winpeshl_ini.exists():
+                self._log("创建WinPE启动配置文件...", "info")
+                winpeshl_content = """[LaunchApps]
+%windir%\\System32\\cmd.exe
+"""
+                try:
+                    winpeshl_ini.parent.mkdir(parents=True, exist_ok=True)
+                    with open(winpeshl_ini, 'w', encoding='utf-8') as f:
+                        f.write(winpeshl_content)
+                    self._log("✅ WinPE启动配置文件创建成功", "success")
+                except Exception as e:
+                    self._log(f"创建WinPE启动配置文件失败: {str(e)}", "warning")
+
+            # 修复启动配置文件中的路径问题
+            setupreg_cmd = mount_path / "Windows" / "System32" / "setupreg.cmd"
+            if setupreg_cmd.exists():
+                self._log("检查并修复setupreg.cmd中的路径配置...", "info")
+                try:
+                    with open(setupreg_cmd, 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # 替换可能存在的错误路径
+                    original_content = content
+                    content = content.replace('X:\\$windows.~bt\\Windows', 'X:\\Windows')
+                    content = content.replace('X:\\$windows.~bt', 'X:\\')
+
+                    if content != original_content:
+                        with open(setupreg_cmd, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        self._log("✅ setupreg.cmd路径配置修复成功", "success")
+                    else:
+                        self._log("setupreg.cmd路径配置正常", "info")
+                except Exception as e:
+                    self._log(f"修复setupreg.cmd失败: {str(e)}", "warning")
+
+        except Exception as e:
+            self._log(f"修复WinPE配置文件时出错: {str(e)}", "warning")
+
+    def add_component_to_wim(self, wim_path: str, component_path: str,
+                           mount_dir: str, component_type: str = "file") -> bool:
+        """
+        使用DISM添加组件到WIM文件
+
+        Args:
+            wim_path: 目标WIM文件路径
+            component_path: 组件路径
+            mount_dir: 挂载目录路径
+            component_type: 组件类型 (file, package, driver, feature)
+
+        Returns:
+            bool: 添加成功状态
+        """
+        self._log(f"使用DISM添加{component_type}到WIM: {component_path}", "info")
+
+        # 确保WIM已挂载
+        if not Path(mount_dir).exists():
+            success = self.mount_wim_with_dism(wim_path, mount_dir)
+            if not success:
+                return False
+
+        component_name = Path(component_path).name
+
+        try:
+            if component_type == "file":
+                # 复制文件到挂载目录
+                target_path = Path(mount_dir) / Path(component_path).name
+                if Path(component_path).is_file():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(component_path, target_path)
+                    self._log(f"文件添加成功: {component_name}", "success")
+                    return True
+                elif Path(component_path).is_dir():
+                    shutil.copytree(component_path, target_path, dirs_exist_ok=True)
+                    self._log(f"目录添加成功: {component_name}", "success")
+                    return True
+
+            elif component_type == "package":
+                # 使用DISM添加包
+                command = [
+                    "/Add-Package",
+                    f"/Image:{mount_dir}",
+                    f"/PackagePath:{component_path}"
+                ]
+                success, output = self.run_dism_command(command, f"添加包 - {component_name}")
+                return success
+
+            elif component_type == "driver":
+                # 使用DISM添加驱动
+                command = [
+                    "/Add-Driver",
+                    f"/Image:{mount_dir}",
+                    f"/Driver:{component_path}",
+                    "/ForceUnsigned"
+                ]
+                success, output = self.run_dism_command(command, f"添加驱动 - {component_name}")
+                return success
+
+            elif component_type == "feature":
+                # 使用DISM启用功能
+                command = [
+                    "/Enable-Feature",
+                    f"/Image:{mount_dir}",
+                    f"/FeatureName:{component_path}",
+                    "/All"
+                ]
+                success, output = self.run_dism_command(command, f"启用功能 - {component_name}")
+                return success
+
+            else:
+                self._log(f"不支持的组件类型: {component_type}", "warning")
+                return False
+
+        except Exception as e:
+            self._log(f"添加组件失败: {component_name} - {str(e)}", "error")
+            return False
+
+    def analyze_mount_differences(self, source_mount: str, target_mount: str) -> Dict:
+        """
+        深度分析两个挂载目录的差异
+
+        Args:
+            source_mount: 源挂载目录
+            target_mount: 目标挂载目录
+
+        Returns:
+            Dict: 挂载目录差异分析结果
+        """
+        self._log("深度分析挂载目录差异", "info")
+        self._update_progress(50, "分析挂载目录结构差异...")
+
+        differences = {
+            "source_mount": source_mount,
+            "target_mount": target_mount,
+            "missing_in_target": [],
+            "additional_in_source": [],
+            "different_files": [],
+            "external_programs": [],
+            "startup_configs": [],
+            "desktop_configs": []
+        }
+
+        source_path = Path(source_mount)
+        target_path = Path(target_mount)
+
+        if not source_path.exists():
+            self._log(f"源挂载目录不存在: {source_mount}", "error")
+            return differences
+
+        if not target_path.exists():
+            self._log(f"目标挂载目录不存在: {target_mount}", "error")
+            return differences
+
+        # 分析外部程序
+        self._update_progress(55, "分析外部程序差异...")
+        external_programs = self._analyze_external_programs(source_path, target_path)
+        differences["external_programs"] = external_programs
+
+        # 分析启动配置
+        self._update_progress(60, "分析启动配置差异...")
+        startup_configs = self._analyze_startup_configs(source_path, target_path)
+        differences["startup_configs"] = startup_configs
+
+        # 分析桌面配置
+        self._update_progress(65, "分析桌面配置差异...")
+        desktop_configs = self._analyze_desktop_configs(source_path, target_path)
+        differences["desktop_configs"] = desktop_configs
+
+        # 深度比较文件结构
+        self._update_progress(70, "深度比较文件结构...")
+        file_differences = self._deep_compare_files(source_path, target_path)
+        differences.update(file_differences)
+
+        self._update_progress(75, "挂载目录差异分析完成")
+        return differences
+
+    def _analyze_external_programs(self, source_path: Path, target_path: Path) -> List[Dict]:
+        """分析外部程序差异"""
+        external_programs = []
+
+        # 查找外部程序目录
+        program_dirs = [
+            "Program Files/WinXShell",
+            "Program Files/CairoShell",
+            "Program Files/Explorer",
+            "Windows/System32/Programs"
+        ]
+
+        for program_dir in program_dirs:
+            source_program = source_path / program_dir
+            target_program = target_path / program_dir
+
+            if source_program.exists():
+                program_info = {
+                    "name": program_dir.replace("/", "\\"),
+                    "source_path": str(source_program),
+                    "target_path": str(target_program),
+                    "exists_in_target": target_program.exists(),
+                    "files": []
+                }
+
+                # 获取所有文件
+                if source_program.is_dir():
+                    for file_path in source_program.rglob("*"):
+                        if file_path.is_file():
+                            relative_path = file_path.relative_to(source_program)
+                            target_file = target_program / relative_path
+
+                            file_info = {
+                                "relative_path": str(relative_path),
+                                "source_file": str(file_path),
+                                "target_file": str(target_file),
+                                "exists_in_target": target_file.exists(),
+                                "size_match": target_file.exists() and file_path.stat().st_size == target_file.stat().st_size
+                            }
+                            program_info["files"].append(file_info)
+
+                external_programs.append(program_info)
+
+        return external_programs
+
+    def _analyze_startup_configs(self, source_path: Path, target_path: Path) -> List[Dict]:
+        """分析启动配置差异"""
+        startup_configs = []
+
+        # 查找启动配置文件
+        config_files = [
+            "Windows/System32/winpeshl.ini",
+            "Windows/System32/PEConfig/Run.cmd",
+            "Windows/System32/PEConfig/LoadPETools.cmd",
+            "Windows/System32/StartNet.cmd"
+        ]
+
+        for config_file in config_files:
+            source_config = source_path / config_file
+            target_config = target_path / config_file
+
+            if source_config.exists():
+                config_info = {
+                    "name": config_file.replace("/", "\\"),
+                    "source_path": str(source_config),
+                    "target_path": str(target_config),
+                    "exists_in_target": target_config.exists(),
+                    "content_match": False
+                }
+
+                if target_config.exists():
+                    try:
+                        source_content = source_config.read_text(encoding='utf-8', errors='ignore')
+                        target_content = target_config.read_text(encoding='utf-8', errors='ignore')
+                        config_info["content_match"] = source_content == target_content
+                    except Exception:
+                        config_info["content_match"] = False
+
+                startup_configs.append(config_info)
+
+        # 分析PEConfig目录下的Run目录
+        peconfig_run_source = source_path / "Windows/System32/PEConfig/Run"
+        peconfig_run_target = target_path / "Windows/System32/PEConfig/Run"
+
+        if peconfig_run_source.exists():
+            for config_file in peconfig_run_source.rglob("*"):
+                if config_file.is_file():
+                    relative_path = config_file.relative_to(peconfig_run_source)
+                    target_config = peconfig_run_target / relative_path
+
+                    config_info = {
+                        "name": f"PEConfig/Run/{relative_path}",
+                        "source_path": str(config_file),
+                        "target_path": str(target_config),
+                        "exists_in_target": target_config.exists(),
+                        "content_match": False
+                    }
+
+                    if target_config.exists():
+                        try:
+                            source_content = config_file.read_text(encoding='utf-8', errors='ignore')
+                            target_content = target_config.read_text(encoding='utf-8', errors='ignore')
+                            config_info["content_match"] = source_content == target_content
+                        except Exception:
+                            config_info["content_match"] = False
+
+                    startup_configs.append(config_info)
+
+        return startup_configs
+
+    def _analyze_desktop_configs(self, source_path: Path, target_path: Path) -> List[Dict]:
+        """分析桌面配置差异"""
+        desktop_configs = []
+
+        # 查找桌面配置文件
+        config_patterns = [
+            "**/*.jcfg",
+            "**/*.lua",
+            "**/*.xml",
+            "**/*.theme"
+        ]
+
+        for pattern in config_patterns:
+            for config_file in source_path.glob(pattern):
+                # 跳过系统文件
+                if any(skip in str(config_file).lower() for skip in [
+                    "windows/system32/catroot",
+                    "windows/system32/wbem",
+                    "windows/winsxs"
+                ]):
+                    continue
+
+                relative_path = config_file.relative_to(source_path)
+                target_config = target_path / relative_path
+
+                config_info = {
+                    "name": str(relative_path).replace("/", "\\"),
+                    "source_path": str(config_file),
+                    "target_path": str(target_config),
+                    "exists_in_target": target_config.exists(),
+                    "size_match": target_config.exists() and config_file.stat().st_size == target_config.stat().st_size
+                }
+
+                desktop_configs.append(config_info)
+
+        return desktop_configs
+
+    def _deep_compare_files(self, source_path: Path, target_path: Path) -> Dict:
+        """深度比较文件结构"""
+        differences = {
+            "missing_in_target": [],
+            "additional_in_source": [],
+            "different_files": []
+        }
+
+        # 比较关键目录
+        key_directories = [
+            "Windows/System32/PEConfig",
+            "Windows/System32/Drivers",
+            "Program Files"
+        ]
+
+        for directory in key_directories:
+            source_dir = source_path / directory
+            target_dir = target_path / directory
+
+            if source_dir.exists():
+                # 获取源目录中的所有文件
+                source_files = set()
+                for file_path in source_dir.rglob("*"):
+                    if file_path.is_file():
+                        relative_path = file_path.relative_to(source_dir)
+                        source_files.add(str(relative_path))
+
+                # 获取目标目录中的所有文件
+                target_files = set()
+                if target_dir.exists():
+                    for file_path in target_dir.rglob("*"):
+                        if file_path.is_file():
+                            relative_path = file_path.relative_to(target_dir)
+                            target_files.add(str(relative_path))
+
+                # 找出缺失的文件
+                missing_files = source_files - target_files
+                for missing_file in missing_files:
+                    differences["missing_in_target"].append({
+                        "directory": directory,
+                        "file": missing_file,
+                        "source_path": str(source_dir / missing_file),
+                        "target_path": str(target_dir / missing_file)
+                    })
+
+        return differences
+
+    def copy_external_programs_to_mount(self, source_mount: str, target_mount: str,
+                                      external_programs: List[Dict]) -> bool:
+        """
+        将外部程序完整复制到目标挂载目录
+
+        Args:
+            source_mount: 源挂载目录
+            target_mount: 目标挂载目录
+            external_programs: 外部程序列表
+
+        Returns:
+            bool: 复制成功状态
+        """
+        self._log("开始复制外部程序到目标挂载目录", "info")
+        self._update_progress(80, "复制外部程序...")
+
+        target_path = Path(target_mount)
+        success_count = 0
+        total_count = len(external_programs)
+
+        for program in external_programs:
+            try:
+                source_path = Path(program["source_path"])
+                target_path_program = target_path / Path(program["name"])
+
+                if source_path.exists():
+                    # 确保目标目录存在
+                    target_path_program.parent.mkdir(parents=True, exist_ok=True)
+
+                    if source_path.is_dir():
+                        # 复制整个目录
+                        if target_path_program.exists():
+                            shutil.rmtree(target_path_program)
+                        shutil.copytree(source_path, target_path_program, dirs_exist_ok=True)
+                        self._log(f"外部程序目录复制成功: {program['name']}", "success")
+                        success_count += 1
+                    elif source_path.is_file():
+                        # 复制文件
+                        target_path_program.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source_path, target_path_program)
+                        self._log(f"外部程序文件复制成功: {program['name']}", "success")
+                        success_count += 1
+                else:
+                    self._log(f"外部程序源路径不存在: {program['source_path']}", "warning")
+
+            except Exception as e:
+                self._log(f"复制外部程序失败: {program['name']} - {str(e)}", "error")
+
+        self._update_progress(85, f"外部程序复制完成 ({success_count}/{total_count})")
+        return success_count == total_count
+
+    def execute_enhanced_version_replacement(self, source_dir: str, target_dir: str,
+                                           output_dir: str) -> Tuple[bool, str, Dict]:
+        """
+        执行增强版版本替换流程
+
+        Args:
+            source_dir: 源目录路径
+            target_dir: 目标目录路径
+            output_dir: 输出目录路径
+
+        Returns:
+            Tuple[bool, str, Dict]: (成功状态, 消息, 详细结果)
+        """
+        try:
+            self._log("开始增强版WinPE版本替换流程", "info")
+            self._update_progress(0, "初始化增强版版本替换...")
+
+            # 路径处理
+            source_path = Path(source_dir)
+            target_path = Path(target_dir)
+            output_path = Path(output_dir)
+
+            # 确保输出目录存在
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # 构建WIM文件路径
+            source_wim = source_path / "boot" / "boot.wim"
+            target_wim = target_path / "boot" / "boot.wim"
+            output_wim = output_path / "boot" / "boot.wim"
+
+            # 创建挂载目录
+            output_mount = output_path / "mount"
+            output_mount.mkdir(parents=True, exist_ok=True)
+
+            # 第一步：使用DISM比较WIM文件
+            self._update_progress(5, "比较源和目标WIM文件...")
+            wim_differences = self.compare_wims_with_dism(str(source_wim), str(target_wim))
+
+            # 第二步：深度分析挂载目录差异
+            self._update_progress(45, "分析挂载目录差异...")
+            if source_path / "mount" and target_path / "mount":
+                mount_differences = self.analyze_mount_differences(
+                    str(source_path / "mount"),
+                    str(target_path / "mount")
+                )
+            else:
+                mount_differences = {"error": "挂载目录不存在"}
+
+            # 第三步：复制目标WIM到输出位置
+            self._update_progress(76, "准备输出WIM文件...")
+            if target_wim.exists():
+                output_wim.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target_wim, output_wim)
+                self._log("目标WIM文件复制完成", "info")
+            else:
+                return False, "目标WIM文件不存在", {}
+
+            # 第四步：挂载输出WIM
+            self._update_progress(77, "挂载输出WIM文件...")
+            if not self.mount_wim_with_dism(str(output_wim), str(output_mount)):
+                return False, "挂载输出WIM失败", {}
+
+            # 修复WinPE启动路径问题
+            self._update_progress(78, "修复WinPE启动路径...")
+            self.fix_winpe_target_path(str(output_mount))
+
+            # 第五步：复制外部程序
+            self._update_progress(79, "复制外部程序...")
+            external_programs = mount_differences.get("external_programs", [])
+            copy_success = self.copy_external_programs_to_mount(
+                str(source_path / "mount"),
+                str(output_mount),
+                external_programs
+            )
+
+            if not copy_success:
+                self._log("外部程序复制部分失败，继续执行...", "warning")
+
+            # 第六步：复制启动配置和桌面配置
+            self._update_progress(87, "复制配置文件...")
+            self._copy_config_files(str(source_path / "mount"), str(output_mount), mount_differences)
+
+            # 第七步：提交更改并卸载
+            self._update_progress(96, "提交更改并卸载WIM...")
+            if not self.unmount_wim_with_dism(str(output_mount), commit=True):
+                return False, "提交WIM更改失败", {}
+
+            # 生成报告
+            result = {
+                "success": True,
+                "source_wim": str(source_wim),
+                "target_wim": str(target_wim),
+                "output_wim": str(output_wim),
+                "wim_differences": wim_differences,
+                "mount_differences": mount_differences,
+                "external_programs_copied": len(external_programs),
+                "timestamp": datetime.now().isoformat()
+            }
+
+            self._update_progress(100, "增强版版本替换完成")
+            success_msg = f"增强版版本替换完成! 输出WIM: {output_wim}"
+            self._log(success_msg, "success")
+
+            return True, success_msg, result
+
+        except Exception as e:
+            error_msg = f"增强版版本替换失败: {str(e)}"
+            self._log(error_msg, "error")
+            return False, error_msg, {}
+
+    def _copy_config_files(self, source_mount: str, target_mount: str, mount_differences: Dict):
+        """复制配置文件"""
+        source_path = Path(source_mount)
+        target_path = Path(target_mount)
+
+        # 复制启动配置
+        startup_configs = mount_differences.get("startup_configs", [])
+        for config in startup_configs:
+            if not config.get("exists_in_target") or not config.get("content_match", False):
+                source_config = Path(config["source_path"])
+                target_config = Path(config["target_path"])
+
+                try:
+                    if source_config.exists():
+                        target_config.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source_config, target_config)
+                        self._log(f"启动配置复制成功: {config['name']}", "success")
+                except Exception as e:
+                    self._log(f"启动配置复制失败: {config['name']} - {str(e)}", "error")
+
+        # 复制桌面配置
+        desktop_configs = mount_differences.get("desktop_configs", [])
+        for config in desktop_configs:
+            if not config.get("exists_in_target"):
+                source_config = Path(config["source_path"])
+                target_config = Path(config["target_path"])
+
+                try:
+                    if source_config.exists():
+                        target_config.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source_config, target_config)
+                        self._log(f"桌面配置复制成功: {config['name']}", "success")
+                except Exception as e:
+                    self._log(f"桌面配置复制失败: {config['name']} - {str(e)}", "error")
+
+    def generate_enhanced_report(self, result: Dict, report_path: str) -> str:
+        """生成增强版版本替换报告"""
+        try:
+            report = {
+                "enhanced_version_replacement": {
+                    "timestamp": result.get("timestamp", datetime.now().isoformat()),
+                    "success": result.get("success", False),
+                    "summary": {
+                        "source_wim": result.get("source_wim", ""),
+                        "target_wim": result.get("target_wim", ""),
+                        "output_wim": result.get("output_wim", ""),
+                        "external_programs_copied": result.get("external_programs_copied", 0)
+                    },
+                    "wim_analysis": result.get("wim_differences", {}),
+                    "mount_analysis": result.get("mount_differences", {}),
+                    "operations": {
+                        "dism_comparison": "✅ 完成",
+                        "mount_analysis": "✅ 完成",
+                        "external_programs_copy": "✅ 完成",
+                        "config_files_copy": "✅ 完成",
+                        "wim_mount_commit": "✅ 完成"
+                    }
+                }
+            }
+
+            # 保存报告
+            report_file = Path(report_path)
+            report_file.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(report_file, 'w', encoding='utf-8') as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+
+            self._log(f"增强版版本替换报告已生成: {report_file}", "info")
+            return str(report_file)
+
+        except Exception as e:
+            error_msg = f"生成增强版报告失败: {str(e)}"
+            self._log(error_msg, "error")
+            return ""

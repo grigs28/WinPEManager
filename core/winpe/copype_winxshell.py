@@ -229,8 +229,8 @@ class CopypeWinXShellIntegrator:
             # 确保目录存在
             system32_path.mkdir(parents=True, exist_ok=True)
 
-            # 获取语言配置
-            language_code = self.config.get("winpe.language", "zh-CN")
+            # 获取语言配置 - 优先使用WinXShell专用语言设置，回退到通用WinPE语言设置
+            language_code = self.config.get("winpe.winxshell_language", self.config.get("winpe.language", "zh-CN"))
             language_name = self._get_language_name(language_code)
 
             # 1. 创建winpeshl.ini

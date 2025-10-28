@@ -7,4 +7,19 @@
 
 # 移除相对导入，让主程序直接导入
 
-__all__ = []
+# 导入版本替换模块
+from .version_replacer import (
+    ComponentAnalyzer,
+    ComponentMigrator,
+    VersionReplaceConfig,
+    VersionReplacer,
+    create_version_replace_config
+)
+
+__all__ = [
+    'ComponentAnalyzer',
+    'ComponentMigrator',
+    'VersionReplaceConfig',
+    'VersionReplacer',
+    'create_version_replace_config'
+]

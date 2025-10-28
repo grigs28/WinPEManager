@@ -37,6 +37,25 @@ class ADKManager:
         self.winpe_path = None
         self.adk_version = None
         self.winpe_versions = {}
+        self.command_callback = None  # 命令输出回调函数
+
+    def set_command_callback(self, callback):
+        """设置命令输出回调函数
+
+        Args:
+            callback: 回调函数，接收(command: str, output: str)参数
+        """
+        self.command_callback = callback
+
+    def _emit_command_output(self, command: str, output: str):
+        """发送命令输出到回调函数
+
+        Args:
+            command: 命令描述
+            output: 输出内容
+        """
+        if self.command_callback:
+            self.command_callback(command, output)
 
     def detect_adk(self) -> Tuple[bool, str]:
         """检测Windows ADK安装情况
@@ -114,8 +133,21 @@ class ADKManager:
         """搜索常见的ADK安装路径"""
         for path_str in self.COMMON_ADK_PATHS:
             path = Path(path_str)
-            if path.exists() and (path / "Assessment and Deployment Kit").exists():
-                return path
+            if path.exists():
+                # 检查多种可能的ADK目录结构
+                adk_indicators = [
+                    "Assessment and Deployment Kit",
+                    "Deployment Tools",
+                    "Windows Kits",
+                    "10" in str(path),
+                    "11" in str(path)
+                ]
+
+                # 只要路径存在且包含Windows Kits相关内容就认为是可能的ADK路径
+                if any(indicator if isinstance(indicator, bool) else (path / indicator).exists()
+                      for indicator in [path / "Assessment and Deployment Kit", path / "Deployment Tools"]):
+                    return path
+
         return None
 
     def _get_adk_version(self, adk_path: Path) -> str:
@@ -392,6 +424,31 @@ class ADKManager:
 
         return None
 
+    def get_oscdimg_path(self) -> Optional[str]:
+        """获取Oscdimg工具路径"""
+        deploy_tools_path = self.get_deployment_tools_path()
+        if not deploy_tools_path:
+            return None
+
+        # 尝试多个可能的架构路径
+        oscdimg_paths = [
+            deploy_tools_path / "amd64" / "Oscdimg" / "oscdimg.exe",
+            deploy_tools_path / "x86" / "Oscdimg" / "oscdimg.exe",
+            deploy_tools_path / "arm64" / "Oscdimg" / "oscdimg.exe",
+        ]
+
+        for oscdimg_path in oscdimg_paths:
+            if oscdimg_path.exists():
+                return str(oscdimg_path)
+
+        # 尝试系统PATH
+        import shutil
+        system_oscdimg = shutil.which("oscdimg.exe")
+        if system_oscdimg:
+            return system_oscdimg
+
+        return None
+
     def run_copype_command(self, architecture: str, working_dir: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
         """运行copype命令（简化版本）
 
@@ -513,15 +570,28 @@ class ADKManager:
             return False, "", "找不到DISM工具"
 
         try:
+            # 修复路径格式问题 - 确保使用正斜杠
+            formatted_args = []
+            for arg in args:
+                if isinstance(arg, str) and (":" in arg or "\\" in arg):
+                    # 将反斜杠转换为正斜杠，并确保路径格式正确
+                    arg = arg.replace("\\", "/")
+                    if not arg.startswith("/") and ":" in arg:
+                        # 这是路径参数，确保格式正确
+                        if "/Image:" in arg or "/MountDir:" in arg or "/ImageFile:" in arg:
+                            continue  # 保持这些参数的原格式
+                formatted_args.append(arg)
+
             # 构建完整命令
-            cmd = [str(dism_path)] + args
+            cmd = [str(dism_path)] + formatted_args
             logger.info(f"执行DISM命令: {' '.join(cmd)}")
             logger.debug(f"DISM路径: {dism_path}")
-            logger.debug(f"命令参数: {args}")
+            logger.debug(f"原始参数: {args}")
+            logger.debug(f"格式化参数: {formatted_args}")
 
             # 添加更详细的日志
-            logger.info(f"开始执行DISM命令，参数: {args}")
-            
+            logger.info(f"开始执行DISM命令，参数: {formatted_args}")
+
             if capture_output:
                 # 使用超时机制和更详细的错误处理
                 result = subprocess.run(
@@ -572,6 +642,24 @@ class ADKManager:
                     logger.debug(f"标准输出: {stdout[:200]}...")
                 logger.error(f"执行的命令: {' '.join(cmd)}")
 
+                # 特殊处理常见的DISM错误代码
+                if result.returncode == 87:
+                    logger.error("DISM错误87分析 - 参数格式问题:")
+                    logger.error("可能的原因:")
+                    logger.error("1. 路径参数格式错误（应使用正斜杠）")
+                    logger.error("2. 参数名称不正确")
+                    logger.error("3. 缺少必需的参数")
+                    logger.error("4. 参数值格式不正确")
+                    logger.error(f"请检查命令格式: {' '.join(cmd)}")
+
+                    # 提供修复建议
+                    if any("/Image:" in arg for arg in formatted_args):
+                        logger.error("建议检查 /Image 参数格式")
+                    if any("/MountDir:" in arg for arg in formatted_args):
+                        logger.error("建议检查 /MountDir 参数格式")
+                    if any("/ImageFile:" in arg for arg in formatted_args):
+                        logger.error("建议检查 /ImageFile 参数格式")
+
             return success, stdout, stderr
 
         except subprocess.TimeoutExpired as e:
@@ -592,6 +680,14 @@ class ADKManager:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except Exception:
             return False
+
+    def get_adk_install_path(self) -> Optional[Path]:
+        """获取ADK安装路径
+
+        Returns:
+            Optional[Path]: ADK安装路径，如果未找到则返回None
+        """
+        return self.adk_path
 
     def get_adk_install_status(self) -> Dict[str, any]:
         """获取ADK完整安装状态"""
@@ -623,7 +719,11 @@ class ADKManager:
         """获取MakeWinPEMedia工具路径"""
         deploy_tools_path = self.get_deployment_tools_path()
         if not deploy_tools_path:
+            logger.debug("无法找到部署工具路径")
+            self._emit_command_output("ADK检查", "部署工具路径不存在")
             return None
+
+        logger.debug(f"部署工具路径: {deploy_tools_path}")
 
         # 查找MakeWinPEMedia.cmd
         makewinpe_paths = [
@@ -632,16 +732,487 @@ class ADKManager:
         ]
 
         for makewinpe_path in makewinpe_paths:
+            logger.debug(f"检查MakeWinPEMedia路径: {makewinpe_path}")
             if makewinpe_path.exists():
+                logger.debug(f"找到MakeWinPEMedia: {makewinpe_path}")
+                self._emit_command_output("ADK检查", f"找到MakeWinPEMedia: {makewinpe_path.name}")
                 return makewinpe_path
+            else:
+                logger.debug(f"MakeWinPEMedia不存在: {makewinpe_path}")
 
         # 尝试系统环境变量
         import shutil
         system_makewinpe = shutil.which("MakeWinPEMedia.cmd")
         if system_makewinpe:
+            logger.debug(f"从系统PATH找到MakeWinPEMedia: {system_makewinpe}")
+            self._emit_command_output("ADK检查", f"从系统PATH找到MakeWinPEMedia")
             return Path(system_makewinpe)
+        else:
+            logger.debug("系统PATH中也找不到MakeWinPEMedia")
+            self._emit_command_output("ADK检查", "系统PATH中找不到MakeWinPEMedia")
 
         return None
+
+    def create_iso_with_oscdimg(self, build_dir: Path, iso_path: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
+        """使用oscdimg创建ISO文件
+
+        Args:
+            build_dir: 包含WinPE文件的构建目录
+            iso_path: 目标ISO文件路径
+            capture_output: 是否捕获输出
+
+        Returns:
+            Tuple[bool, str, str]: (成功状态, 标准输出, 错误输出)
+        """
+        # 先检查ADK路径，如果未检测到则重新检测
+        adk_path = self.get_adk_install_path()
+        if not adk_path:
+            self._emit_command_output("ADK检查", "ADK路径为空，尝试重新检测...")
+            # 手动调用ADK检测
+            adk_installed, adk_message = self.detect_adk()
+            if not adk_installed:
+                error_msg = f"找不到ADK安装路径 - {adk_message}"
+                self._emit_command_output("ADK检查", error_msg)
+
+                # 手动搜索常见路径
+                self._emit_command_output("ADK检查", "手动搜索常见ADK安装路径...")
+                common_paths = self._search_common_paths()
+                if common_paths and common_paths.exists():
+                    self.adk_path = common_paths
+                    adk_path = common_paths
+                    self._emit_command_output("ADK检查", f"手动找到ADK路径: {adk_path}")
+                else:
+                    # 输出详细的搜索路径信息
+                    self._emit_command_output("ADK检查", "以下路径均已检查但未找到ADK:")
+                    for path in self.adk_common_paths:
+                        self._emit_command_output("ADK检查", f"  - {path} {'(存在)' if Path(path).exists() else '(不存在)'}")
+
+                    # 最后尝试：直接搜索oscdimg.exe而不依赖ADK路径
+                    self._emit_command_output("最后尝试", "直接搜索oscdimg.exe...")
+                    import shutil
+                    system_oscdimg = shutil.which("oscdimg.exe")
+                    if system_oscdimg:
+                        self._emit_command_output("最后尝试", f"从系统PATH找到oscdimg.exe: {system_oscdimg}")
+                        oscdimg_path = system_oscdimg
+                        # 跳过ADK路径检查，直接使用oscdimg
+                        return self._create_iso_direct(oscdimg_path, build_dir, iso_path, boot_dir, capture_output)
+
+                    return False, "", error_msg
+            else:
+                adk_path = self.adk_path
+                self._emit_command_output("ADK检查", f"重新检测成功: {adk_message}")
+        else:
+            self._emit_command_output("ADK检查", f"找到ADK路径: {adk_path}")
+
+        # 检查部署工具路径
+        deploy_tools_path = self.get_deployment_tools_path()
+        if not deploy_tools_path:
+            error_msg = "找不到部署工具路径"
+            self._emit_command_output("部署工具检查", error_msg)
+            # 尝试手动构建部署工具路径
+            possible_deploy_paths = [
+                adk_path / "Assessment and Deployment Kit" / "Deployment Tools",
+                adk_path / "Deployment Tools"
+            ]
+            for path in possible_deploy_paths:
+                if path.exists():
+                    self._emit_command_output("部署工具检查", f"找到替代部署工具路径: {path}")
+                    deploy_tools_path = path
+                    break
+            if not deploy_tools_path:
+                return False, "", error_msg
+        else:
+            self._emit_command_output("部署工具检查", f"找到部署工具路径: {deploy_tools_path}")
+
+        # 查找oscdimg.exe
+        oscdimg_path = self.get_oscdimg_path()
+        if not oscdimg_path:
+            error_msg = "找不到oscdimg工具"
+
+            # 手动搜索oscdimg.exe
+            oscdimg_search_paths = [
+                deploy_tools_path / "amd64" / "Oscdimg" / "oscdimg.exe",
+                deploy_tools_path / "x86" / "Oscdimg" / "oscdimg.exe",
+                deploy_tools_path / "arm64" / "Oscdimg" / "oscdimg.exe"
+            ]
+
+            self._emit_command_output("oscdimg搜索", "开始搜索oscdimg.exe...")
+            for search_path in oscdimg_search_paths:
+                if search_path.exists():
+                    oscdimg_path = str(search_path)
+                    self._emit_command_output("oscdimg搜索", f"找到oscdimg.exe: {oscdimg_path}")
+                    break
+                else:
+                    self._emit_command_output("oscdimg搜索", f"检查路径: {search_path} - 不存在")
+
+            if not oscdimg_path:
+                # 尝试系统PATH
+                import shutil
+                system_oscdimg = shutil.which("oscdimg.exe")
+                if system_oscdimg:
+                    oscdimg_path = system_oscdimg
+                    self._emit_command_output("oscdimg搜索", f"从系统PATH找到oscdimg.exe: {oscdimg_path}")
+                else:
+                    error_msg += f" - 已搜索路径: {[str(p) for p in oscdimg_search_paths]}"
+                    self._emit_command_output("错误", error_msg)
+                    return False, "", error_msg
+
+        try:
+            # 确保构建目录存在
+            if not build_dir.exists():
+                raise Exception(f"构建目录不存在: {build_dir}")
+
+            # 确保boot目录存在
+            boot_dir = build_dir / "boot"
+            if not boot_dir.exists():
+                raise Exception(f"boot目录不存在: {boot_dir}")
+
+            # 如果ISO文件已存在，先删除
+            if iso_path.exists():
+                logger.info(f"删除现有ISO文件: {iso_path}")
+                self._emit_command_output("文件操作", f"删除现有ISO: {iso_path}")
+                iso_path.unlink()
+
+            # 确保ISO输出目录存在
+            iso_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # 构建完整的oscdimg命令
+            cmd = [oscdimg_path]
+
+            # 添加优化和格式参数
+            # 注意：-u2参数不能与-j1、-j2、-n、-nt、-d、-oi同时使用
+            cmd.extend([
+                "-m",                    # 优化文件分配表大小
+                "-o",                    # 覆盖现有文件
+                "-u2",                   # UDF文件系统版本2.0
+                "-udfver102",           # UDF版本1.02（兼容性更好）
+                "-lWinPE_Replaced",      # 卷标名
+                "-h",                    # 包含隐藏文件
+                "-x",                    # 忽略压缩属性
+                "-w"                     # 警告覆盖
+                # 移除了 -np (长文件名支持) 和 -j1 (Joliet文件系统)，
+                # 因为它们与 -u2 冲突。UDF 2.0 本身就支持长文件名和Unicode
+            ])
+
+            # 检查并添加启动数据
+            bootsect_file = boot_dir / "etfsboot.com"
+            efi_file = boot_dir / "efisys.bin"
+            efi_noesp_file = boot_dir / "efisys_noesp.bin"
+
+            # 获取ADK中的原始启动文件路径
+            adk_boot_files = {}
+            deploy_tools_path = self.get_deployment_tools_path()
+            if deploy_tools_path:
+                adk_etfsboot = deploy_tools_path / "amd64" / "Oscdimg" / "etfsboot.com"
+                adk_efisys = deploy_tools_path / "amd64" / "Oscdimg" / "efisys.bin"
+                adk_efisys_noesp = deploy_tools_path / "amd64" / "Oscdimg" / "efisys_noesp.bin"
+
+                if adk_etfsboot.exists():
+                    adk_boot_files['etfsboot'] = adk_etfsboot
+                if adk_efisys.exists():
+                    adk_boot_files['efisys'] = adk_efisys
+                if adk_efisys_noesp.exists():
+                    adk_boot_files['efisys_noesp'] = adk_efisys_noesp
+
+            # 详细启动文件检查
+            boot_files_status = []
+
+            # 检查etfsboot.com
+            if bootsect_file.exists():
+                boot_files_status.append(f"etfsboot.com (本地) ({bootsect_file.stat().st_size} bytes)")
+            elif 'etfsboot' in adk_boot_files:
+                # 复制ADK中的etfsboot.com到本地
+                import shutil
+                try:
+                    shutil.copy2(adk_boot_files['etfsboot'], bootsect_file)
+                    boot_files_status.append(f"etfsboot.com (从ADK复制) ({bootsect_file.stat().st_size} bytes)")
+                    self._emit_command_output("文件复制", f"已复制etfsboot.com从ADK到boot目录")
+                except Exception as e:
+                    boot_files_status.append(f"etfsboot.com (复制失败): {str(e)}")
+            else:
+                boot_files_status.append("etfsboot.com (缺失)")
+
+            # 检查efisys.bin
+            if efi_file.exists():
+                boot_files_status.append(f"efisys.bin (本地) ({efi_file.stat().st_size} bytes)")
+            elif 'efisys' in adk_boot_files:
+                # 复制ADK中的efisys.bin到本地
+                import shutil
+                try:
+                    shutil.copy2(adk_boot_files['efisys'], efi_file)
+                    boot_files_status.append(f"efisys.bin (从ADK复制) ({efi_file.stat().st_size} bytes)")
+                    self._emit_command_output("文件复制", f"已复制efisys.bin从ADK到boot目录")
+                except Exception as e:
+                    boot_files_status.append(f"efisys.bin (复制失败): {str(e)}")
+            else:
+                boot_files_status.append("efisys.bin (缺失)")
+
+            # 检查efisys_noesp.bin
+            if efi_noesp_file.exists():
+                boot_files_status.append(f"efisys_noesp.bin (本地) ({efi_noesp_file.stat().st_size} bytes)")
+            elif 'efisys_noesp' in adk_boot_files:
+                # 复制ADK中的efisys_noesp.bin到本地
+                import shutil
+                try:
+                    shutil.copy2(adk_boot_files['efisys_noesp'], efi_noesp_file)
+                    boot_files_status.append(f"efisys_noesp.bin (从ADK复制) ({efi_noesp_file.stat().st_size} bytes)")
+                    self._emit_command_output("文件复制", f"已复制efisys_noesp.bin从ADK到boot目录")
+                except Exception as e:
+                    boot_files_status.append(f"efisys_noesp.bin (复制失败): {str(e)}")
+            else:
+                boot_files_status.append("efisys_noesp.bin (缺失)")
+
+            self._emit_command_output("启动文件检查", ", ".join(boot_files_status))
+
+            # 重新检查启动文件是否已准备就绪
+            etfsboot_ready = bootsect_file.exists()
+            efisys_ready = efi_file.exists()
+
+            # 构建启动数据参数
+            if etfsboot_ready:
+                if efisys_ready:
+                    # 支持传统BIOS和UEFI启动（双重启动）
+                    # 按照用户成功的格式：文件路径需要用引号包围
+                    self._emit_command_output("启动模式", "双重启动: 传统BIOS + UEFI")
+
+                    # 验证启动文件
+                    if bootsect_file.stat().st_size == 0:
+                        raise Exception("etfsboot.com文件为空")
+                    if efi_file.stat().st_size == 0:
+                        raise Exception("efisys.bin文件为空")
+
+                    # 按照用户成功的格式构建bootdata参数（路径加引号）
+                    boot_data = f'2#p0,e,b"{bootsect_file}"#pEF,e,b"{efi_file}"'
+
+                else:
+                    # 仅支持传统BIOS启动
+                    self._emit_command_output("启动模式", "传统BIOS启动")
+
+                    if bootsect_file.stat().st_size == 0:
+                        raise Exception("etfsboot.com文件为空")
+
+                    boot_data = f'2#p0,e,b"{bootsect_file}"'
+
+                cmd.extend(["-bootdata:" + boot_data])
+                logger.info(f"添加启动数据: {boot_data}")
+
+                # 输出详细的启动数据信息
+                self._emit_command_output("启动数据", f"启动数据参数: {boot_data}")
+
+                # 验证启动文件详细信息
+                self._emit_command_output("文件验证", f"etfsboot.com: {bootsect_file.stat().st_size} bytes")
+                if efisys_ready:
+                    self._emit_command_output("文件验证", f"efisys.bin: {efi_file.stat().st_size} bytes")
+
+                # 验证启动文件完整性
+                if bootsect_file.stat().st_size < 1024:  # etfsboot.com应该至少1KB
+                    logger.warning(f"etfsboot.com文件大小异常: {bootsect_file.stat().st_size} bytes")
+                    self._emit_command_output("警告", f"etfsboot.com文件大小可能异常: {bootsect_file.stat().st_size} bytes")
+
+            else:
+                logger.warning("未找到启动文件，将创建非启动ISO")
+                self._emit_command_output("警告", "未找到启动文件，创建非启动ISO")
+
+            # 添加源目录和目标文件
+            cmd.extend([str(build_dir), str(iso_path)])
+
+            # 输出完整命令行到日志和UI
+            # 注意：subprocess.run会正确处理命令列表，不需要额外的引号
+            full_command_display = ' '.join([f'"{arg}"' if ' ' in str(arg) and not arg.startswith('"') and not arg.endswith('"') else str(arg) for arg in cmd])
+            logger.info(f"完整oscdimg命令: {full_command_display}")
+            self._emit_command_output("完整命令", f"oscdimg.exe 命令行:")
+            self._emit_command_output("命令详情", full_command_display)
+
+            # 显示实际传递给subprocess的命令列表
+            cmd_list_display = '[' + ', '.join([f'"{arg}"' for arg in cmd]) + ']'
+            self._emit_command_output("命令列表", f"实际命令参数: {cmd_list_display}")
+
+            # 生成用户提供的标准PowerShell命令格式
+            exe_path = cmd[0]
+            args = cmd[1:]
+
+            # 按照用户的正确格式生成PowerShell命令
+            ps_lines = ['& "' + str(exe_path) + '" `']
+
+            # 每个参数单独一行，用 ` 续行
+            for arg in args:
+                if ' ' in str(arg) or '"' in str(arg):
+                    ps_lines.append('    "' + str(arg) + '" `')
+                else:
+                    ps_lines.append('    ' + str(arg) + ' `')
+
+            # 移除最后一个 ` 并合并
+            ps_lines[-1] = ps_lines[-1].rstrip(' `')
+            ps_command = '\n'.join(ps_lines)
+
+            self._emit_command_output("PowerShell命令", ps_command)
+
+            # 同时生成单行版本（用于复制粘贴）
+            single_line_args = []
+            for arg in args:
+                if ' ' in str(arg) or '"' in str(arg):
+                    single_line_args.append('"' + str(arg) + '"')
+                else:
+                    single_line_args.append(str(arg))
+
+            single_line_command = '& "' + str(exe_path) + '" ' + ' '.join(single_line_args)
+            self._emit_command_output("单行命令", single_line_command)
+
+            # 输出参数解释
+            self._emit_command_output("参数说明", "命令参数说明:")
+            param_explanations = [
+                "-m: 优化文件分配表大小",
+                "-o: 覆盖现有文件",
+                "-u2: UDF文件系统版本2.0 (自带长文件名和Unicode支持)",
+                "-udfver102: UDF版本1.02(兼容性更好)",
+                "-lWinPE_Replaced: 卷标名",
+                "-h: 包含隐藏文件",
+                "-x: 忽略压缩属性",
+                "-w: 警告覆盖",
+                "注意: -u2与-j1、-np等参数冲突，UDF 2.0已内置Unicode支持"
+            ]
+            for explanation in param_explanations:
+                self._emit_command_output("参数", explanation)
+
+            # 使用PowerShell执行oscdimg命令（按照用户成功的格式）
+            logger.info("使用PowerShell执行oscdimg命令")
+
+            # 构建PowerShell命令
+            ps_command = '& "' + str(cmd[0]) + '"'
+            for arg in cmd[1:]:
+                arg_str = str(arg)
+                # 检查是否是bootdata参数（已包含引号）
+                if arg_str.startswith('-bootdata:'):
+                    # bootdata参数已经包含了正确的引号，直接使用
+                    ps_command += ' ' + arg_str
+                elif ' ' in arg_str or '"' in arg_str:
+                    # 其他包含空格或引号的参数需要加引号
+                    ps_command += ' "' + arg_str + '"'
+                else:
+                    # 普通参数直接添加
+                    ps_command += ' ' + arg_str
+
+            logger.info(f"PowerShell命令: {ps_command}")
+            self._emit_command_output("执行方式", "使用PowerShell执行")
+            self._emit_command_output("完整命令", ps_command)
+
+            # 使用PowerShell执行命令
+            ps_cmd = ['powershell.exe', '-Command', ps_command]
+            result = subprocess.run(
+                ps_cmd,
+                capture_output=True,
+                text=False,
+                timeout=300,  # 5分钟超时
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            success = result.returncode == 0
+
+            # 处理输出
+            from utils.encoding import safe_decode
+            stdout = safe_decode(result.stdout) if result.stdout else ""
+            stderr = safe_decode(result.stderr) if result.stderr else ""
+
+            # 发送命令输出到回调
+            if stdout:
+                lines = stdout.split('\n')
+                for line in lines:
+                    if line.strip():
+                        self._emit_command_output("oscdimg输出", line.strip())
+
+            if stderr:
+                lines = stderr.split('\n')
+                for line in lines:
+                    if line.strip():
+                        self._emit_command_output("oscdimg错误", line.strip())
+
+            logger.info(f"PowerShell oscdimg命令执行完成，返回码: {result.returncode}")
+
+            if success:
+                logger.info("PowerShell oscdimg命令执行成功")
+                self._emit_command_output("ISO创建完成", f"ISO文件已创建: {iso_path}")
+                # 发送100%进度完成信号
+                if hasattr(self, '_emit_progress'):
+                    self._emit_progress(100, "ISO文件创建完成")
+            else:
+                logger.error(f"PowerShell oscdimg命令执行失败，返回码: {result.returncode}")
+                self._emit_command_output("ISO创建失败", f"返回码: {result.returncode}")
+
+            return success, stdout, stderr
+
+        except subprocess.TimeoutExpired:
+            error_msg = "PowerShell oscdimg命令执行超时（5分钟）"
+            logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
+        except Exception as e:
+            error_msg = f"PowerShell oscdimg命令执行异常: {str(e)}"
+            logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
+
+    def _create_iso_direct(self, oscdimg_path: str, build_dir: Path, iso_path: Path, boot_dir: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
+        """直接使用oscdimg创建ISO（绕过ADK路径检查）"""
+        try:
+            # 构建完整的oscdimg命令
+            cmd = [oscdimg_path]
+
+            # 添加优化和格式参数（避免与-u2冲突的参数）
+            cmd.extend([
+                "-m", "-o", "-u2", "-udfver102", "-lWinPE_Replaced",
+                "-h", "-x", "-w"
+                # 移除 -np 和 -j1，因为与 -u2 冲突
+            ])
+
+            # 检查启动文件
+            bootsect_file = boot_dir / "etfsboot.com"
+            efi_file = boot_dir / "efisys.bin"
+
+            if bootsect_file.exists():
+                if efi_file.exists():
+                    # 按照用户成功的格式：路径需要用引号包围
+                    boot_data = f'2#p0,e,b"{bootsect_file}"#pEF,e,b"{efi_file}"'
+                    self._emit_command_output("启动模式", "双重启动: 传统BIOS + UEFI")
+                else:
+                    boot_data = f'2#p0,e,b"{bootsect_file}"'
+                    self._emit_command_output("启动模式", "传统BIOS启动")
+                cmd.extend(["-bootdata:" + boot_data])
+
+            # 添加源目录和目标文件
+            cmd.extend([str(build_dir), str(iso_path)])
+
+            # 输出完整命令行
+            full_command = ' '.join([f'"{arg}"' if ' ' in str(arg) else str(arg) for arg in cmd])
+            self._emit_command_output("完整命令", f"直接使用oscdimg创建ISO:")
+            self._emit_command_output("命令详情", full_command)
+
+            # 执行命令
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=False,
+                timeout=300,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            success = result.returncode == 0
+
+            # 处理输出
+            from utils.encoding import safe_decode
+            stdout = safe_decode(result.stdout) if result.stdout else ""
+            stderr = safe_decode(result.stderr) if result.stderr else ""
+
+            if success:
+                self._emit_command_output("ISO创建完成", f"ISO文件已创建: {iso_path}")
+            else:
+                self._emit_command_output("ISO创建失败", f"返回码: {result.returncode}")
+
+            return success, stdout, stderr
+
+        except Exception as e:
+            error_msg = f"直接创建ISO失败: {str(e)}"
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
 
     def run_make_winpe_media_command(self, args: List[str], capture_output: bool = True) -> Tuple[bool, str, str]:
         """运行MakeWinPEMedia命令
@@ -655,7 +1226,22 @@ class ADKManager:
         """
         makewinpe_path = self.get_make_winpe_media_path()
         if not makewinpe_path:
-            return False, "", "找不到MakeWinPEMedia工具"
+            error_msg = "找不到MakeWinPEMedia工具"
+
+            # 提供更详细的错误信息
+            adk_path = self.get_adk_install_path()
+            if not adk_path:
+                error_msg += " - 未找到Windows ADK安装，请确保已安装Windows ADK"
+            else:
+                deploy_tools_path = self.get_deployment_tools_path()
+                if not deploy_tools_path:
+                    error_msg += f" - ADK已安装但找不到部署工具，请检查ADK安装是否完整"
+                else:
+                    error_msg += f" - 部署工具路径: {deploy_tools_path}，但找不到MakeWinPEMedia.cmd"
+
+            logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
 
         try:
             # 构建完整命令
@@ -666,6 +1252,7 @@ class ADKManager:
 
             # 添加更详细的日志
             logger.info(f"开始执行MakeWinPEMedia命令，参数: {args}")
+            self._emit_command_output("MakeWinPEMedia启动", f"命令: {' '.join(cmd)}")
 
             # 检查是否为ISO创建命令，如果是，先尝试删除现有ISO文件
             if len(args) >= 3 and args[0].upper() == '/ISO':
@@ -673,11 +1260,14 @@ class ADKManager:
                 import os
                 if os.path.exists(iso_path):
                     logger.info(f"检测到现有ISO文件，将先删除: {iso_path}")
+                    self._emit_command_output("文件操作", f"删除现有ISO: {iso_path}")
                     try:
                         os.remove(iso_path)
                         logger.info(f"成功删除现有ISO文件: {iso_path}")
+                        self._emit_command_output("文件操作", "现有ISO文件删除成功")
                     except Exception as e:
                         logger.warning(f"无法删除现有ISO文件: {iso_path}, 错误: {str(e)}")
+                        self._emit_command_output("文件操作", f"删除ISO文件失败: {str(e)}")
 
             if capture_output:
                 # 使用超时机制和更详细的错误处理
@@ -694,15 +1284,40 @@ class ADKManager:
                 from utils.encoding import safe_decode
                 stdout = safe_decode(result.stdout) if result.stdout else ""
                 stderr = safe_decode(result.stderr) if result.stderr else ""
-                
+
+                # 发送命令输出到回调
+                if stdout:
+                    # 将输出分行处理，避免一次性输出太多
+                    lines = stdout.split('\n')
+                    for i, line in enumerate(lines[:50]):  # 限制前50行
+                        if line.strip():
+                            self._emit_command_output("命令输出", line.strip())
+                        if i >= 49:  # 如果超过50行，显示省略提示
+                            self._emit_command_output("命令输出", "... (输出过多，已省略)")
+                            break
+
+                if stderr:
+                    # 错误输出也分行处理
+                    lines = stderr.split('\n')
+                    for i, line in enumerate(lines[:20]):  # 错误输出限制前20行
+                        if line.strip():
+                            self._emit_command_output("错误输出", line.strip())
+                        if i >= 19:
+                            self._emit_command_output("错误输出", "... (错误输出过多，已省略)")
+                            break
+
                 # 添加更详细的日志
                 logger.info(f"MakeWinPEMedia命令执行完成，返回码: {result.returncode}")
+                self._emit_command_output("命令完成", f"返回码: {result.returncode}")
+
                 if success:
                     logger.info("MakeWinPEMedia命令执行成功")
+                    self._emit_command_output("执行结果", "命令执行成功")
                     if stdout:
                         logger.debug(f"MakeWinPEMedia标准输出: {stdout[:200]}...")  # 只记录前200字符
                 else:
                     logger.error(f"MakeWinPEMedia命令执行失败，返回码: {result.returncode}")
+                    self._emit_command_output("执行结果", "命令执行失败")
                     logger.error(f"错误输出: {stderr[:200]}...")  # 只记录前200字符
                     if stdout:
                         logger.debug(f"标准输出: {stdout[:200]}...")

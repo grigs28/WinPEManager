@@ -752,6 +752,13 @@ class UICreators:
 
         self.main_window.tab_widget.addTab(widget, "系统日志")
 
+    def create_version_replace_tab(self):
+        """创建版本替换标签页"""
+        from ui.main_window.version_replacer_widget import VersionReplacerWidget
+
+        version_replace_widget = VersionReplacerWidget(parent=self.main_window)
+        self.main_window.tab_widget.addTab(version_replace_widget, "版本替换")
+
     def create_status_bar(self):
         """创建状态栏"""
         self.main_window.status_label = QLabel("就绪")

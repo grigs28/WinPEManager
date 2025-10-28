@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self.create_customization_tab()
         self.create_build_tab()
         self.create_log_tab()
+        self.create_version_replace_tab()  # 启用版本替换UI
 
         # 创建状态栏
         self.create_status_bar()
@@ -110,6 +111,10 @@ class MainWindow(QMainWindow):
     def create_log_tab(self):
         """创建日志标签页"""
         self.ui_creators.create_log_tab()
+
+    def create_version_replace_tab(self):
+        """创建版本替换标签页"""
+        self.ui_creators.create_version_replace_tab()  # 启用版本替换UI
 
     def create_status_bar(self):
         """创建状态栏"""
