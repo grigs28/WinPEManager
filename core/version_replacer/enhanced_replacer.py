@@ -828,19 +828,79 @@ class EnhancedVersionReplacer:
                 "timestamp": datetime.now().isoformat()
             }
 
-            # 步骤1：使用copype模块构建WIN10REPLACED
-            self._log("步骤1: 使用copype模块构建WIN10REPLACED", "info")
+            # 步骤1：使用copype命令构建WIN10REPLACED
+            self._log("步骤1: 使用copype命令构建WIN10REPLACED", "info")
             self._update_progress(5, "使用copype构建WinPE工作目录...")
 
-            from core.copype_manager import CopypeManager
-            copype_manager = CopypeManager(self.adk, self._update_progress)
+            # 删除已有的WIN10REPLACED目录，让copype直接创建
+            if output_path.exists():
+                self._log(f"删除已存在的WIN10REPLACED目录: {output_path}", "info")
+                shutil.rmtree(output_path, ignore_errors=True)
 
-            # 直接在WIN10REPLACED目录中创建WinPE结构，不在WinPE子目录中
-            copype_success, message, workspace_path = copype_manager.create_winpe_workspace_direct(
-                "amd64",
-                output_path,
-                progress_callback=self._update_progress
-            )
+            # 使用copype命令直接在WinPE_amd64目录中创建WIN10REPLACED
+            # 就像创建WinPE_20251028_235101那样：
+            # cd D:\APP\WinPEManager\WinPE_amd64
+            # copype amd64 WIN10REPLACED
+            parent_dir = output_path.parent  # WinPE_amd64
+            copype_cmd = self.adk.get_copype_command()
+            if not copype_cmd:
+                return False, "找不到copype命令", result
+
+            self._log(f"执行copype命令: copype amd64 WIN10REPLACED", "info")
+            self._log(f"工作目录: {parent_dir}", "info")
+
+            # 使用subprocess直接运行copype命令
+            import subprocess
+            import os
+
+            env = os.environ.copy()
+            env['PATH'] = str(copype_cmd.parent) + os.pathsep + env['PATH']
+
+            try:
+                process = subprocess.Popen(
+                    [str(copype_cmd), "amd64", "WIN10REPLACED"],
+                    cwd=parent_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    env=env
+                )
+
+                # 监控输出
+                while True:
+                    line = process.stdout.readline()
+                    if not line:
+                        break
+                    line = line.strip()
+                    if line:
+                        self._log(f"[copype] {line}", "info")
+                        # 简单的进度解析
+                        if "Copying" in line:
+                            self._update_progress(30, "正在复制文件...")
+                        elif "Mounting" in line:
+                            self._update_progress(70, "挂载WIM文件...")
+                        elif "Unmounting" in line:
+                            self._update_progress(90, "卸载WIM文件...")
+
+                return_code = process.wait()
+                if return_code == 0:
+                    self._log("copype执行成功", "success")
+                    copype_success = True
+                    message = "copype执行成功"
+                    workspace_path = output_path
+                else:
+                    self._log(f"copype执行失败，返回码: {return_code}", "error")
+                    copype_success = False
+                    message = f"copype执行失败，返回码: {return_code}"
+                    workspace_path = output_path
+
+            except Exception as e:
+                self._log(f"执行copype命令失败: {str(e)}", "error")
+                copype_success = False
+                message = f"执行copype命令失败: {str(e)}"
+                workspace_path = output_path
 
             if not copype_success:
                 return False, "copype构建WinPE工作目录失败", result
