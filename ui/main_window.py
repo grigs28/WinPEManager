@@ -86,12 +86,12 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         main_layout.addWidget(self.tab_widget)
 
-        # 创建各个标签页
+        # 创建各个标签页（按用户要求的顺序）
         self.create_basic_config_tab()
         self.create_customization_tab()
         self.create_build_tab()
-        self.create_log_tab()
-        self.create_version_replace_tab()  # 启用版本替换UI
+        self.create_version_replace_tab()  # 版本替换
+        self.create_log_tab()  # 系统日志
 
         # 创建状态栏
         self.create_status_bar()

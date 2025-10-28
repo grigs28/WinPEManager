@@ -92,7 +92,7 @@ class EnhancedVersionReplacer:
 
     def run_dism_command(self, command: List[str], description: str = "") -> Tuple[bool, str]:
         """
-        运行DISM命令
+        运行DISM命令（带进度支持）
 
         Args:
             command: DISM命令参数列表
@@ -102,35 +102,33 @@ class EnhancedVersionReplacer:
             Tuple[bool, str]: (成功状态, 输出信息)
         """
         try:
-            full_command = [self.dism_path] + command
-
             self._log(f"执行DISM命令: {description}", "info")
-            log_command(" ".join(full_command))
 
-            # 运行命令
-            result = subprocess.run(
-                full_command,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                timeout=1800  # 30分钟超时
-            )
+            # 创建进度回调函数
+            def progress_callback(percent: int, message: str):
+                progress_msg = f"DISM进度 {percent}%: {message}"
+                self._update_progress(percent, f"DISM {description}: {message}")
+                self._log(progress_msg, "info")
+                print(f"{progress_msg} [增强版本替换]")
 
-            if result.returncode == 0:
-                self._log(f"DISM命令成功: {description}", "success")
-                return True, result.stdout
+            # 使用ADK管理器的带进度方法
+            success, stdout, stderr = self.adk.run_dism_command_with_progress(command, progress_callback)
+
+            if success:
+                success_msg = f"DISM命令成功: {description}"
+                self._log(success_msg, "success")
+                print(f"{success_msg} [成功]")
+                return True, stdout
             else:
-                error_msg = f"DISM命令失败: {description}\n错误信息: {result.stderr}"
+                error_msg = f"DISM命令失败: {description}\n错误信息: {stderr}"
                 self._log(error_msg, "error")
-                return False, result.stderr
+                print(f"{error_msg} [错误]")
+                return False, stderr
 
-        except subprocess.TimeoutExpired:
-            error_msg = f"DISM命令超时: {description}"
-            self._log(error_msg, "error")
-            return False, error_msg
         except Exception as e:
             error_msg = f"DISM命令执行异常: {description} - {str(e)}"
             self._log(error_msg, "error")
+            print(f"{error_msg} [异常]")
             return False, error_msg
 
     def analyze_wim_with_dism(self, wim_path: str, description: str = "") -> Dict:

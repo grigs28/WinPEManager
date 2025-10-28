@@ -9,8 +9,9 @@ import os
 import subprocess
 import winreg
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Callable
 import logging
+from utils.logger import log_command
 
 logger = logging.getLogger("WinPEManager")
 
@@ -213,6 +214,27 @@ class ADKManager:
             return deploy_tools_path
         return None
 
+    def get_winpe_paths(self) -> List[Path]:
+        """获取WinPE路径列表"""
+        winpe_paths = []
+
+        if not self.adk_path:
+            return winpe_paths
+
+        # 常见的WinPE路径
+        base_paths = [
+            self.adk_path / "Assessment and Deployment Kit" / "Windows Preinstallation Environment",
+        ]
+
+        # 检查x86和x64版本
+        for base_path in base_paths:
+            if base_path.exists():
+                for arch_path in base_path.iterdir():
+                    if arch_path.is_dir() and arch_path.name in ["amd64", "x86", "arm64"]:
+                        winpe_paths.append(arch_path)
+
+        return winpe_paths
+
     def get_dandisetenv_path(self) -> Optional[Path]:
         """获取DandISetEnv.bat文件路径"""
         deploy_tools_path = self.get_deployment_tools_path()
@@ -338,68 +360,6 @@ class ADKManager:
             logger.error(error_msg)
             return False, error_msg
 
-    def get_copype_path(self) -> Optional[Path]:
-        """获取copype工具路径"""
-        # 首先尝试系统环境变量
-        import shutil
-        system_copype = shutil.which("copype.cmd")
-        if system_copype:
-            logger.debug(f"从PATH中找到copype.cmd: {system_copype}")
-            return Path(system_copype)
-
-        deploy_tools_path = self.get_deployment_tools_path()
-        if not deploy_tools_path:
-            logger.debug("部署工具路径不存在，无法查找copype")
-            return None
-
-        # 在部署工具目录中查找copype.cmd
-        copype_paths = [
-            deploy_tools_path / "copype.cmd",
-            deploy_tools_path / "amd64" / "copype.cmd",
-            deploy_tools_path / "x86" / "copype.cmd"
-        ]
-
-        logger.debug(f"搜索copype.cmd路径: {copype_paths}")
-
-        for copype_path in copype_paths:
-            if copype_path.exists():
-                logger.debug(f"找到copype.cmd: {copype_path}")
-                return copype_path
-
-        # 在ADK安装根目录中查找
-        if self.adk_path:
-            adk_copype_paths = [
-                self.adk_path / "Assessment and Deployment Kit" / "Windows Preinstallation Environment" / "copype.cmd",
-                self.adk_path / "Assessment and Deployment Kit" / "Deployment Tools" / "copype.cmd"
-            ]
-
-            for copype_path in adk_copype_paths:
-                if copype_path.exists():
-                    logger.debug(f"在ADK根目录中找到copype.cmd: {copype_path}")
-                    return copype_path
-
-        # 在WinPE目录中查找
-        if self.winpe_path:
-            winpe_copype_paths = [
-                self.winpe_path / "copype.cmd",
-                self.winpe_path.parent / "copype.cmd"
-            ]
-
-            for arch_path in self.winpe_path.iterdir():
-                if arch_path.is_dir() and arch_path.name in ["amd64", "x86", "arm64"]:
-                    copype_in_arch = arch_path / "copype.cmd"
-                    winpe_copype_paths.append(copype_in_arch)
-                    # 也在arch_path的父目录中查找
-                    winpe_copype_paths.append(arch_path.parent / "copype.cmd")
-
-            for copype_path in winpe_copype_paths:
-                if copype_path.exists():
-                    logger.debug(f"在WinPE目录中找到copype.cmd: {copype_path}")
-                    return copype_path
-
-        logger.debug("未找到copype.cmd工具")
-        return None
-
     def get_dism_path(self) -> Optional[Path]:
         """获取DISM工具路径"""
         deploy_tools_path = self.get_deployment_tools_path()
@@ -449,8 +409,8 @@ class ADKManager:
 
         return None
 
-    def run_copype_command(self, architecture: str, working_dir: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
-        """运行copype命令（简化版本）
+    def run_copype_command_legacy(self, architecture: str, working_dir: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
+        """运行copype命令（简化版本，已弃用，请使用run_copype_command）
 
         Args:
             architecture: WinPE架构 (amd64, x86, arm64)
@@ -463,6 +423,10 @@ class ADKManager:
         copype_path = self.get_copype_path()
         if not copype_path:
             return False, "", "找不到copype工具"
+
+        # 确保working_dir是Path对象
+        if isinstance(working_dir, str):
+            working_dir = Path(working_dir)
 
         try:
             # 确保工作目录不存在（copype需要创建新目录）
@@ -673,6 +637,144 @@ class ADKManager:
             logger.error(f"错误详情: {repr(e)}")
             return False, "", error_msg
 
+    def run_dism_command_with_progress(self, args: List[str], progress_callback=None) -> Tuple[bool, str, str]:
+        """运行DISM命令，支持实时进度回调
+
+        Args:
+            args: DISM命令参数
+            progress_callback: 进度回调函数 (percent: int, message: str)
+
+        Returns:
+            Tuple[bool, str, str]: (成功状态, 标准输出, 错误输出)
+        """
+        dism_path = self.get_dism_path()
+        if not dism_path:
+            return False, "", "找不到DISM工具"
+
+        try:
+            # 修复路径格式问题 - 确保使用正斜杠
+            formatted_args = []
+            for arg in args:
+                if isinstance(arg, str) and (":" in arg or "\\" in arg):
+                    # 将反斜杠转换为正斜杠，并确保路径格式正确
+                    arg = arg.replace("\\", "/")
+                    if not arg.startswith("/") and ":" in arg:
+                        # 这是路径参数，确保格式正确
+                        if "/Image:" in arg or "/MountDir:" in arg or "/ImageFile:" in arg:
+                            continue  # 保持这些参数的原格式
+                formatted_args.append(arg)
+
+            # 构建完整命令
+            cmd = [str(dism_path)] + formatted_args
+            logger.info(f"执行DISM命令(带进度): {' '.join(cmd)}")
+
+            # 使用subprocess.Popen实现实时输出读取
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            if progress_callback:
+                progress_callback(5, "正在初始化DISM操作...")
+
+            total_lines = 0
+            processed_lines = 0
+            progress_stages = {
+                "正在初始化": 10,
+                "正在搜索": 20,
+                "正在处理": 50,
+                "正在应用": 70,
+                "正在清理": 90,
+                "完成": 100
+            }
+
+            # 实时读取输出
+            stdout_lines = []
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+
+                if line:
+                    line = line.strip()
+                    if line:
+                        stdout_lines.append(line)
+                        total_lines += 1
+
+                        # 发送命令输出到回调和终端
+                        if hasattr(self, '_emit_command_output'):
+                            self._emit_command_output("DISM输出", line)
+                        # 同时输出到终端
+                        print(f"{line} [DISM]")
+
+                        # 尝试解析进度信息
+                        if progress_callback:
+                            # 基于关键词判断进度阶段
+                            for keyword, progress in progress_stages.items():
+                                if keyword in line:
+                                    progress_callback(progress, f"正在执行: {keyword}")
+                                    break
+
+                            # 如果是数字百分比（某些DISM操作会输出）
+                            import re
+                            percentage_match = re.search(r'(\d+)%', line)
+                            if percentage_match:
+                                percent = int(percentage_match.group(1))
+                                progress_callback(min(percent, 100), f"进度: {percent}%")
+
+                            # 基于操作类型设置基础进度
+                            if "/mount-wim" in ' '.join(cmd).lower():
+                                base_progress = 20
+                                if processed_lines > 0:
+                                    progress = min(base_progress + (processed_lines * 3), 95)
+                                    progress_callback(progress, f"挂载进度: {progress}%")
+                            elif "/unmount-wim" in ' '.join(cmd).lower():
+                                base_progress = 20
+                                if processed_lines > 0:
+                                    progress = min(base_progress + (processed_lines * 4), 95)
+                                    progress_callback(progress, f"卸载进度: {progress}%")
+
+                processed_lines += 1
+
+            # 等待进程完成
+            return_code = process.wait()
+            success = return_code == 0
+
+            stdout = '\n'.join(stdout_lines)
+            stderr = ""
+
+            if success:
+                success_msg = "DISM命令执行成功"
+                logger.info(success_msg)
+                print(f"{success_msg} [成功]")
+                if progress_callback:
+                    progress_callback(100, "DISM操作完成")
+            else:
+                error_msg = f"DISM命令执行失败，返回码: {return_code}"
+                logger.error(error_msg)
+                print(f"{error_msg} [错误]")
+                if progress_callback:
+                    progress_callback(0, f"DISM操作失败，返回码: {return_code}")
+
+            return success, stdout, stderr
+
+        except Exception as e:
+            error_msg = f"执行DISM命令时发生错误: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"错误详情: {repr(e)}")
+            print(f"{error_msg} [异常]")
+            print(f"{repr(e)} [异常详情]")
+            if progress_callback:
+                progress_callback(0, error_msg)
+            return False, "", error_msg
+
     def check_admin_privileges(self) -> bool:
         """检查是否具有管理员权限"""
         try:
@@ -726,10 +828,17 @@ class ADKManager:
         logger.debug(f"部署工具路径: {deploy_tools_path}")
 
         # 查找MakeWinPEMedia.cmd
-        makewinpe_paths = [
+        makewinpe_paths = []
+
+        # 新版本ADK中MakeWinPEMedia.cmd在WinPE根目录下
+        if self.winpe_path:
+            makewinpe_paths.append(self.winpe_path / "MakeWinPEMedia.cmd")
+
+        # 传统路径
+        makewinpe_paths.extend([
             deploy_tools_path / "amd64" / "MakeWinPEMedia.cmd",
             deploy_tools_path / "x86" / "MakeWinPEMedia.cmd"
-        ]
+        ])
 
         for makewinpe_path in makewinpe_paths:
             logger.debug(f"检查MakeWinPEMedia路径: {makewinpe_path}")
@@ -751,10 +860,286 @@ class ADKManager:
             logger.debug("系统PATH中也找不到MakeWinPEMedia")
             self._emit_command_output("ADK检查", "系统PATH中找不到MakeWinPEMedia")
 
+    def get_copype_path(self) -> Optional[Path]:
+        """获取copype.cmd路径
+
+        Returns:
+            Optional[Path]: copype.cmd路径，如果未找到则返回None
+        """
+        try:
+            # 首先从WinPE路径查找
+            winpe_paths = self.get_winpe_paths()
+            for winpe_path in winpe_paths:
+                if winpe_path:
+                    copype_path = winpe_path / "amd64" / "copype.cmd"
+                    if copype_path.exists():
+                        logger.info(f"找到copype: {copype_path}")
+                        self._emit_command_output("WinPE检查", f"找到copype: {copype_path.name}")
+                        return copype_path
+                    else:
+                        logger.debug(f"copype不存在: {copype_path}")
+
+            # 从WinPE路径查找（正确位置）
+            if self.winpe_path:
+                copype_path = self.winpe_path / "copype.cmd"
+                if copype_path.exists():
+                    logger.info(f"从WinPE根目录找到copype: {copype_path}")
+                    self._emit_command_output("ADK检查", f"从WinPE根目录找到copype: {copype_path.name}")
+                    return copype_path
+
+            # 从部署工具路径查找（备用位置）
+            deploy_tools_path = self.get_deployment_tools_path()
+            if deploy_tools_path:
+                copype_path = deploy_tools_path / "copype.cmd"
+                if copype_path.exists():
+                    logger.info(f"从部署工具找到copype: {copype_path}")
+                    self._emit_command_output("ADK检查", f"从部署工具找到copype: {copype_path.name}")
+                    return copype_path
+
+            # 尝试系统环境变量
+            import shutil
+            system_copype = shutil.which("copype.cmd")
+            if system_copype:
+                logger.info(f"从系统PATH找到copype: {system_copype}")
+                self._emit_command_output("ADK检查", f"从系统PATH找到copype")
+                return Path(system_copype)
+
+            logger.debug("未找到copype.cmd")
+            return None
+
+        except Exception as e:
+            logger.error(f"查找copype路径时发生错误: {str(e)}")
+            return None
+
+    def run_copype_command(self, args: List[str], capture_output: bool = True,
+                          working_dir: Optional[Path] = None) -> Tuple[bool, str, str]:
+        """运行copype命令
+
+        Args:
+            args: copype命令参数
+            capture_output: 是否捕获输出
+            working_dir: 工作目录
+
+        Returns:
+            Tuple[bool, str, str]: (成功状态, 标准输出, 错误输出)
+        """
+        copype_path = self.get_copype_path()
+        if not copype_path:
+            return False, "", "找不到copype工具"
+
+        try:
+            # 构建完整命令
+            cmd = [str(copype_path)] + args
+            logger.info(f"执行copype命令: {' '.join(cmd)}")
+            log_command(" ".join(cmd))
+
+            # 执行命令
+            result = subprocess.run(
+                cmd,
+                cwd=working_dir,
+                capture_output=capture_output,
+                text=False,
+                timeout=1800,  # 30分钟超时
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            if capture_output:
+                stdout = result.stdout.decode('utf-8', errors='replace')
+                stderr = result.stderr.decode('utf-8', errors='replace')
+            else:
+                stdout = ""
+                stderr = ""
+
+            success = result.returncode == 0
+
+            if success:
+                logger.info("copype命令执行成功")
+                self._emit_command_output("copype完成", "copype操作完成")
+            else:
+                logger.error(f"copype命令执行失败，返回码: {result.returncode}")
+                self._emit_command_output("copype失败", f"返回码: {result.returncode}")
+
+            return success, stdout, stderr
+
+        except subprocess.TimeoutExpired:
+            error_msg = "copype命令执行超时（30分钟）"
+            logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
+        except Exception as e:
+            error_msg = f"执行copype命令时发生错误: {str(e)}"
+            logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, "", error_msg
+
+    def run_copype_with_progress(self, args: List[str], progress_callback=None,
+                                working_dir: Optional[Path] = None) -> Tuple[bool, str]:
+        """运行copype命令（带进度支持）
+
+        Args:
+            args: copype命令参数
+            progress_callback: 进度回调函数 (percent: int, message: str)
+            working_dir: 工作目录
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        copype_path = self.get_copype_path()
+        if not copype_path:
+            return False, "找不到copype工具"
+
+        try:
+            # 构建完整命令
+            cmd = [str(copype_path)] + args
+            logger.info(f"执行copype命令(带进度): {' '.join(cmd)}")
+            log_command(" ".join(cmd))
+
+            # 使用subprocess.Popen实现实时输出读取
+            process = subprocess.Popen(
+                cmd,
+                cwd=working_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+
+            if progress_callback:
+                progress_callback(5, "正在初始化copype操作...")
+
+            # 实时读取输出
+            output_lines = []
+            total_lines = 0
+            stage_progress = {
+                "initializing": 10,
+                "copying": 30,
+                "creating": 50,
+                "generating": 70,
+                "wim": 90
+            }
+
+            try:
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+
+                    if line:
+                        line = line.strip()
+                        if line:
+                            output_lines.append(line)
+                            total_lines += 1
+
+                            # 发送命令输出到回调和终端
+                            self._emit_command_output("copype输出", line)
+                            print(f"{line} [copype]")
+
+                            # 尝试解析进度信息
+                            if progress_callback:
+                                # 基于关键词判断进度阶段
+                                line_lower = line.lower()
+                                for keyword, progress in stage_progress.items():
+                                    if keyword in line_lower:
+                                        progress_callback(progress, f"正在执行: {keyword}")
+                                        break
+
+                                # 基于行数计算进度
+                                estimated_progress = min(total_lines * 2, 95)
+                                if total_lines % 5 == 0:  # 每5行更新一次进度
+                                    progress_callback(estimated_progress, f"处理进度: {estimated_progress}%")
+
+                # 等待进程完成
+                return_code = process.wait()
+                success = return_code == 0
+
+                stdout = '\n'.join(output_lines)
+
+                if success:
+                    logger.info("copype命令执行成功")
+                    if progress_callback:
+                        progress_callback(100, "copype操作完成")
+                else:
+                    logger.error(f"copype命令执行失败，返回码: {return_code}")
+                    if progress_callback:
+                        progress_callback(0, f"copype操作失败，返回码: {return_code}")
+
+                return success, stdout
+
+            except Exception as e:
+                error_msg = f"读取copype输出时发生错误: {str(e)}"
+                logger.error(error_msg)
+                if progress_callback:
+                    progress_callback(0, error_msg)
+                return False, ""
+
+        except Exception as e:
+            error_msg = f"执行copype命令时发生错误: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"错误详情: {repr(e)}")
+            if progress_callback:
+                progress_callback(0, error_msg)
+            return False, error_msg
+
+    def create_winpe_workspace(self, architecture: str, workspace_dir: Path,
+                             progress_callback: Optional[Callable] = None) -> Tuple[bool, str]:
+        """创建WinPE工作空间（使用copype）
+
+        Args:
+            architecture: 架构 (amd64, x86, arm64)
+            workspace_dir: 工作空间目录
+            progress_callback: 进度回调函数
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        winpe_dir = workspace_dir / "WinPE"
+
+        try:
+            self.logger.info(f"开始创建WinPE工作空间: {architecture}")
+
+            # 确保工作目录存在
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+
+            # 清理现有的WinPE目录
+            if winpe_dir.exists():
+                import shutil
+                shutil.rmtree(winpe_dir)
+                self.logger.info(f"清理现有WinPE目录: {winpe_dir}")
+
+            # 运行copype命令
+            success, output = self.run_copype_with_progress(
+                [architecture, "WinPE"],
+                progress_callback,
+                workspace_dir
+            )
+
+            if success:
+                success_msg = f"WinPE工作空间创建成功: {winpe_dir}"
+                self.logger.info(success_msg)
+                self._emit_command_output("工作空间创建", success_msg)
+                print(f"{success_msg} [成功]")
+                return True, success_msg
+            else:
+                error_msg = f"WinPE工作空间创建失败: {output}"
+                self.logger.error(error_msg)
+                self._emit_command_output("工作空间创建", error_msg)
+                print(f"{error_msg} [失败]")
+                return False, error_msg
+
+        except Exception as e:
+            error_msg = f"创建WinPE工作空间时发生错误: {str(e)}"
+            self.logger.error(error_msg)
+            self._emit_command_output("错误", error_msg)
+            return False, error_msg
+
         return None
 
     def create_iso_with_oscdimg(self, build_dir: Path, iso_path: Path, capture_output: bool = True) -> Tuple[bool, str, str]:
-        """使用oscdimg创建ISO文件
+        """使用MakeWinPEMedia创建ISO文件（统一接口，替代oscdimg）
 
         Args:
             build_dir: 包含WinPE文件的构建目录
@@ -764,7 +1149,26 @@ class ADKManager:
         Returns:
             Tuple[bool, str, str]: (成功状态, 标准输出, 错误输出)
         """
-        # 先检查ADK路径，如果未检测到则重新检测
+        try:
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self)
+
+            # 使用MakeWinPEMedia创建ISO
+            success, message = makewinpe_manager.create_winpe_iso(build_dir, iso_path)
+
+            if success:
+                return True, message, ""
+            else:
+                return False, "", message
+
+        except ImportError as e:
+            error_msg = f"无法导入MakeWinPEMedia管理器: {str(e)}"
+            logger.error(error_msg)
+            return False, "", error_msg
+        except Exception as e:
+            error_msg = f"使用MakeWinPEMedia创建ISO时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, "", error_msg
         adk_path = self.get_adk_install_path()
         if not adk_path:
             self._emit_command_output("ADK检查", "ADK路径为空，尝试重新检测...")
@@ -1380,3 +1784,104 @@ class ADKManager:
             # 异常时也返回原路径，这在现代Windows系统中是正常的
             logger.debug(f"获取短文件名失败，使用原路径: {long_path} ({e})")
             return long_path
+
+    def create_winpe_iso(self, workspace_path: Path, iso_path: Path,
+                        progress_callback: Optional[Callable] = None) -> Tuple[bool, str]:
+        """
+        创建WinPE ISO文件（使用统一的MakeWinPEMedia管理器）
+
+        Args:
+            workspace_path: WinPE工作空间路径
+            iso_path: 输出ISO文件路径
+            progress_callback: 进度回调函数
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        try:
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self, progress_callback)
+            return makewinpe_manager.create_winpe_iso(workspace_path, iso_path, progress_callback)
+        except ImportError as e:
+            error_msg = f"无法导入MakeWinPEMedia管理器: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"创建WinPE ISO时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    def create_bootable_usb(self, workspace_path: Path, usb_drive: str,
+                           progress_callback: Optional[Callable] = None) -> Tuple[bool, str]:
+        """
+        创建可启动U盘（使用统一的MakeWinPEMedia管理器）
+
+        Args:
+            workspace_path: WinPE工作空间路径
+            usb_drive: U盘驱动器号 (如 "E:")
+            progress_callback: 进度回调函数
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        try:
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self, progress_callback)
+            return makewinpe_manager.create_bootable_usb(workspace_path, usb_drive, progress_callback)
+        except ImportError as e:
+            error_msg = f"无法导入MakeWinPEMedia管理器: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"创建可启动U盘时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    def create_wim_from_media(self, media_path: Path, wim_path: Path,
+                            progress_callback: Optional[Callable] = None) -> Tuple[bool, str]:
+        """
+        从媒体创建WIM文件（使用统一的MakeWinPEMedia管理器）
+
+        Args:
+            media_path: 媒体路径
+            wim_path: 输出WIM文件路径
+            progress_callback: 进度回调函数
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 消息)
+        """
+        try:
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self, progress_callback)
+            return makewinpe_manager.create_wim_from_media(media_path, wim_path, progress_callback)
+        except ImportError as e:
+            error_msg = f"无法导入MakeWinPEMedia管理器: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"从媒体创建WIM文件时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
+    def validate_winpe_workspace(self, workspace_path: Path) -> Tuple[bool, str]:
+        """
+        验证WinPE工作空间的完整性（使用统一的MakeWinPEMedia管理器）
+
+        Args:
+            workspace_path: 工作空间路径
+
+        Returns:
+            Tuple[bool, str]: (成功状态, 验证消息)
+        """
+        try:
+            from core.makewinpe_manager import MakeWinPEMediaManager
+            makewinpe_manager = MakeWinPEMediaManager(self)
+            return makewinpe_manager.validate_winpe_workspace(workspace_path)
+        except ImportError as e:
+            error_msg = f"无法导入MakeWinPEMedia管理器: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"验证WinPE工作空间时发生错误: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg

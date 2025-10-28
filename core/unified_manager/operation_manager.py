@@ -83,12 +83,25 @@ class OperationManager:
             
             # 记录命令
             log_command(" ".join(args), "挂载WIM镜像")
-            
-            # 执行DISM命令
-            success, stdout, stderr = self.adk.run_dism_command(args)
+
+            # 执行DISM命令（带进度支持）
+            def progress_callback(percent: int, message: str):
+                """进度回调函数"""
+                progress_msg = f"挂载进度 {percent}%: {message}"
+                self.logger.info(progress_msg)
+                print(f"{progress_msg} [WIM操作]")
+                if self.parent_callback and hasattr(self.parent_callback, '__call__'):
+                    try:
+                        self.parent_callback(percent, message)
+                    except:
+                        pass  # 忽略回调错误
+
+            success, stdout, stderr = self.adk.run_dism_command_with_progress(args, progress_callback)
             
             if success:
-                self.logger.info("✅ WIM镜像挂载成功")
+                success_msg = "✅ WIM镜像挂载成功"
+                self.logger.info(success_msg)
+                print(f"{success_msg} [成功]")
                 log_build_step("WIM挂载成功", f"挂载目录: {mount_dir}")
                 log_system_event("WIM挂载", "WIM镜像挂载成功", "info")
                 
@@ -174,12 +187,25 @@ class OperationManager:
             
             # 记录命令
             log_command(" ".join(args), f"{action}卸载WIM镜像")
-            
-            # 执行DISM命令
-            success, stdout, stderr = self.adk.run_dism_command(args)
+
+            # 执行DISM命令（带进度支持）
+            def progress_callback(percent: int, message: str):
+                """进度回调函数"""
+                progress_msg = f"卸载进度 {percent}%: {message}"
+                self.logger.info(progress_msg)
+                print(f"{progress_msg} [WIM操作]")
+                if self.parent_callback and hasattr(self.parent_callback, '__call__'):
+                    try:
+                        self.parent_callback(percent, message)
+                    except:
+                        pass  # 忽略回调错误
+
+            success, stdout, stderr = self.adk.run_dism_command_with_progress(args, progress_callback)
             
             if success:
-                self.logger.info(f"✅ WIM镜像{action}卸载成功")
+                success_msg = f"✅ WIM镜像{action}卸载成功"
+                self.logger.info(success_msg)
+                print(f"{success_msg} [成功]")
                 log_build_step("WIM卸载成功", f"{action}卸载完成")
                 log_system_event("WIM卸载", f"WIM镜像{action}卸载成功", "info")
                 
@@ -295,34 +321,34 @@ class OperationManager:
             start_build_session(build_info)
             
             try:
-                # 使用ADK管理器的oscdimg工具直接创建ISO
-                self.logger.info("使用oscdimg工具创建ISO文件")
+                # 使用ADK管理器的MakeWinPEMedia工具创建ISO
+                self.logger.info("使用MakeWinPEMedia工具创建ISO文件")
 
                 # 记录命令
-                log_command(f"oscdimg {build_dir} -> {iso_path}", "创建ISO文件")
+                log_command(f"MakeWinPEMedia /ISO {build_dir} {iso_path}", "创建ISO文件")
 
-                # 执行oscdimg命令
-                self.logger.info("执行oscdimg命令...")
+                # 执行MakeWinPEMedia命令
+                self.logger.info("执行MakeWinPEMedia命令...")
                 if iso_path.exists():
                     self.logger.info(f"目标ISO文件已存在: {iso_path}")
                     self.logger.info("将自动覆盖现有ISO文件")
 
-                success, stdout, stderr = self.adk.create_iso_with_oscdimg(build_dir, iso_path)
-                
+                success, message = self.adk.create_winpe_iso(build_dir, iso_path)
+
                 if success:
                     self.logger.info("✅ ISO文件创建成功")
                     log_build_step("ISO创建成功", f"文件: {iso_path}")
                     log_system_event("ISO创建", "ISO文件创建成功", "info")
-                    
+
                     # 检查ISO文件大小
                     if iso_path.exists():
                         file_size = iso_path.stat().st_size / (1024 * 1024)
                         self.logger.info(f"ISO文件大小: {file_size:.1f} MB")
-                    
+
                     end_build_session(True, f"ISO创建成功: {iso_path}")
                     return True, f"ISO文件创建成功: {iso_path}"
                 else:
-                    error_msg = f"oscdimg命令失败: {stderr}"
+                    error_msg = f"MakeWinPEMedia命令失败: {message}"
                     self.logger.error(error_msg)
                     log_system_event("ISO创建失败", error_msg, "error")
                     end_build_session(False, error_msg)

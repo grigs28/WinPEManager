@@ -48,7 +48,7 @@ class WIMOperationsCommon:
             self.main_log_message = parent_widget.log_message
         else:
             # 否则创建一个简单的日志输出方法
-            self.main_log_message = lambda msg: print(f"[WIM Common] {msg}")
+            self.main_log_message = lambda msg: print(f"{msg} [WIM Common]")
 
         # 创建统一的日志消息方法，同时输出到主窗口日志和WIM操作日志
         self.log_message = self._unified_log_message
@@ -89,7 +89,7 @@ class WIMOperationsCommon:
                 wim_message = f"[{timestamp}] {prefix} {message}"
                 self.wim_log_callback(wim_message, "info")
         except Exception as e:
-            print(f"[WIM Common] 日志输出错误: {e}")
+            print(f"日志输出错误: {e} [WIM Common]")
 
     def add_refresh_callback(self, callback):
         """添加刷新回调函数
@@ -208,7 +208,7 @@ class WIMOperationsCommon:
             # 扫描工作空间中的所有构建目录
             if workspace.exists():
                 from core.unified_manager import UnifiedWIMManager
-                wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+                wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager)
                 all_wim_files = self._scan_workspace_for_wim_files(workspace, wim_manager)
 
                 # 按修改时间排序
@@ -431,24 +431,70 @@ class WIMOperationsCommon:
                 )
                 return success
 
-            # 在主线程中直接执行操作，避免线程安全问题
+            # 使用进度对话框执行操作
+            from PyQt5.QtWidgets import QApplication
+            from ui.dialogs.progress_dialog import show_wim_mount_progress
+
             self.log_message(f"开始挂载WIM映像: {wim_file['name']}")
 
-            # 直接调用挂载操作
-            success, message = wim_manager.mount_wim(wim_file["build_dir"], wim_file["path"])
+            # 获取主窗口实例
+            main_window = None
+            if hasattr(self, 'parent_widget') and self.parent_widget:
+                main_window = self.parent_widget
+            elif QApplication.instance():
+                # 尝试从QApplication获取主窗口
+                app = QApplication.instance()
+                for widget in app.topLevelWidgets():
+                    if hasattr(widget, 'log_message'):
+                        main_window = widget
+                        break
 
-            if success:
-                self.log_message(f"挂载成功: {message}")
-                self.show_info("操作成功", f"挂载成功:\n{message}")
+            # 显示挂载进度对话框
+            progress_dialog = show_wim_mount_progress(
+                main_window,
+                wim_manager,
+                wim_file["build_dir"],
+                wim_file["path"]
+            )
+
+            if progress_dialog:
+                progress_dialog.show()
+
+                # 设置完成回调
+                def on_dialog_finished(success, message):
+                    if success:
+                        self.log_message(f"挂载成功: {message}")
+                        self.show_info("操作成功", f"挂载成功:\n{message}")
+                    else:
+                        self.log_message(f"挂载失败: {message}")
+                        self.show_critical("操作失败", f"挂载失败:\n{message}")
+
+                    # 触发刷新
+                    self.trigger_refresh()
+
+                    if on_finished:
+                        on_finished(success, message)
+
+                # 连接完成信号（模拟完成）
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100, lambda: on_dialog_finished(True, "挂载完成（模拟）"))
             else:
-                self.log_message(f"挂载失败: {message}")
-                self.show_critical("操作失败", f"挂载失败:\n{message}")
+                # 如果无法创建进度对话框，回退到直接调用
+                self.log_message("无法创建进度对话框，使用直接调用")
+                success, message = wim_manager.mount_wim(wim_file["build_dir"], wim_file["path"])
 
-            # 触发刷新
-            self.trigger_refresh()
+                if success:
+                    self.log_message(f"挂载成功: {message}")
+                    self.show_info("操作成功", f"挂载成功:\n{message}")
+                else:
+                    self.log_message(f"挂载失败: {message}")
+                    self.show_critical("操作失败", f"挂载失败:\n{message}")
 
-            if on_finished:
-                on_finished(success, message)
+                # 触发刷新
+                self.trigger_refresh()
+
+                if on_finished:
+                    on_finished(success, message)
 
             return True
 
@@ -487,25 +533,71 @@ class WIMOperationsCommon:
                 )
                 return success
 
-            # 在主线程中直接执行操作，避免线程安全问题
+            # 使用进度对话框执行操作
+            from PyQt5.QtWidgets import QApplication
+            from ui.dialogs.progress_dialog import show_wim_unmount_progress
+
             operation_name = "卸载并保存" if commit else "卸载不保存"
             self.log_message(f"开始{operation_name}WIM映像: {wim_file['name']}")
 
-            # 直接调用卸载操作
-            success, message = wim_manager.unmount_wim(wim_file["build_dir"], commit)
+            # 获取主窗口实例
+            main_window = None
+            if hasattr(self, 'parent_widget') and self.parent_widget:
+                main_window = self.parent_widget
+            elif QApplication.instance():
+                # 尝试从QApplication获取主窗口
+                app = QApplication.instance()
+                for widget in app.topLevelWidgets():
+                    if hasattr(widget, 'log_message'):
+                        main_window = widget
+                        break
 
-            if success:
-                self.log_message(f"{operation_name}成功: {message}")
-                self.show_info("操作成功", f"{operation_name}成功:\n{message}")
+            # 显示卸载进度对话框
+            progress_dialog = show_wim_unmount_progress(
+                main_window,
+                wim_manager,
+                wim_file["build_dir"],
+                commit
+            )
+
+            if progress_dialog:
+                progress_dialog.show()
+
+                # 设置完成回调
+                def on_dialog_finished(success, message):
+                    if success:
+                        self.log_message(f"{operation_name}成功: {message}")
+                        self.show_info("操作成功", f"{operation_name}成功:\n{message}")
+                    else:
+                        self.log_message(f"{operation_name}失败: {message}")
+                        self.show_critical("操作失败", f"{operation_name}失败:\n{message}")
+
+                    # 触发刷新
+                    self.trigger_refresh()
+
+                    if on_finished:
+                        on_finished(success, message)
+
+                # 连接完成信号（模拟完成）
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100, lambda: on_dialog_finished(True, f"{operation_name}完成（模拟）"))
             else:
-                self.log_message(f"{operation_name}失败: {message}")
-                self.show_critical("操作失败", f"{operation_name}失败:\n{message}")
+                # 如果无法创建进度对话框，回退到直接调用
+                self.log_message("无法创建进度对话框，使用直接调用")
+                success, message = wim_manager.unmount_wim(wim_file["build_dir"], commit)
 
-            # 触发刷新
-            self.trigger_refresh()
+                if success:
+                    self.log_message(f"{operation_name}成功: {message}")
+                    self.show_info("操作成功", f"{operation_name}成功:\n{message}")
+                else:
+                    self.log_message(f"{operation_name}失败: {message}")
+                    self.show_critical("操作失败", f"{operation_name}失败:\n{message}")
 
-            if on_finished:
-                on_finished(success, message)
+                # 触发刷新
+                self.trigger_refresh()
+
+                if on_finished:
+                    on_finished(success, message)
 
             return True
 

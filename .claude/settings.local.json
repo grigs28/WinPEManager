@@ -16,7 +16,9 @@
       "Bash(do)",
       "Bash(done)",
       "Read(//c/Program Files (x86)/Windows Kits/10/Assessment and Deployment Kit/Deployment Tools/amd64/Oscdimg/**)",
-      "Read(//c/Program Files (x86)/Windows Kits/10/**)"
+      "Read(//c/Program Files (x86)/Windows Kits/10/**)",
+      "Bash(where:*)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

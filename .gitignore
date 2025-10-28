@@ -162,6 +162,7 @@ docs/
 tests/
 Desktop/
 module/
+replacer/
 # Claude configuration (to be excluded as requested)
 CLAUDE.md
 

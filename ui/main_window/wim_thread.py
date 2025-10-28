@@ -43,7 +43,19 @@ class WIMOperationThread(QThread):
 
             # 创建统一WIM管理器
             self.progress_signal.emit(10)
-            wim_manager = UnifiedWIMManager(self.config_manager, self.adk_manager, self.parent)
+
+            # 创建进度回调函数
+            def progress_callback(percent: int, message: str):
+                progress_msg = f"进度 {percent}%: {message}"
+                self.progress_signal.emit(percent)
+                self.log_signal.emit(progress_msg)
+                print(f"{progress_msg} [WIM线程]")
+
+            wim_manager = UnifiedWIMManager(
+                self.config_manager,
+                self.adk_manager,
+                progress_callback
+            )
             self.progress_signal.emit(20)
 
             # 根据操作类型执行相应的方法
@@ -86,11 +98,11 @@ class WIMOperationThread(QThread):
         self.progress_signal.emit(40)
         self.log_signal.emit(f"开始挂载WIM文件: {wim_file_path.name}")
 
-        # 执行挂载
-        self.progress_signal.emit(60)
+        # 执行挂载（现在会通过progress_callback更新真实进度）
+        self.log_signal.emit("正在执行DISM挂载命令...")
         success, message = wim_manager.mount_wim(self.build_dir, wim_file_path)
 
-        self.progress_signal.emit(80)
+        self.progress_signal.emit(95)
         self.log_signal.emit("验证挂载结果...")
 
         return success, message
@@ -110,16 +122,14 @@ class WIMOperationThread(QThread):
         action_text = "保存更改并" if commit else "放弃更改并"
         self.log_signal.emit(f"开始{action_text}卸载...")
 
-        # 执行卸载
-        self.progress_signal.emit(60)
-        self.log_signal.emit(f"正在{action_text}卸载WIM镜像...")
+        # 执行卸载（现在会通过progress_callback更新真实进度）
+        self.log_signal.emit(f"正在执行DISM卸载命令...")
         success, message = wim_manager.unmount_wim(self.build_dir, commit=commit)
 
-        self.progress_signal.emit(80)
+        self.progress_signal.emit(95)
         self.log_signal.emit("验证卸载结果...")
 
         # 完成清理工作
-        self.progress_signal.emit(90)
         if success:
             self.log_signal.emit("清理挂载信息文件...")
             action_result = "保存更改" if commit else "放弃更改"

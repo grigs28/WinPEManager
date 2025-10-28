@@ -148,7 +148,7 @@ class BaseImageManager:
 
             # 使用copype创建基础环境
             logger.info(f"执行copype命令: copype {copype_arch} {current_build_path}")
-            success, stdout, stderr = self.adk.run_copype_command(
+            success, stdout, stderr = self.adk.run_copype_command_legacy(
                 copype_arch,
                 current_build_path,
                 capture_output=True

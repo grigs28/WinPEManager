@@ -10,14 +10,15 @@ from pathlib import Path
 from typing import Optional, Dict
 
 from PyQt5.QtWidgets import (
-    QMessageBox, QFileDialog, QProgressDialog
+    QMessageBox, QFileDialog
 )
 from PyQt5.QtCore import Qt
 
 from ui.button_styler import apply_3d_button_style_alternate
 from utils.logger import log_error
-from .wim_thread import WIMOperationThread
-from ui.shared.wim_operations_common import WIMOperationsCommon
+from .wim_thread import WIMOperationThread as OriginalWIMOperationThread
+from ui.shared.wim_operations_common import WIMOperationsCommon, WIMSignals
+from ui.dialogs.progress_dialog import ProgressDialog, WIMOperationThread
 
 
 class WIMOperations:
@@ -57,8 +58,22 @@ class WIMOperations:
                 self.wim_ops_common.show_warning("提示", "请先选择要挂载的WIM映像文件")
                 return
 
-            # 使用共享功能执行挂载操作
-            self.wim_ops_common.mount_wim_with_progress(wim_file, self.wim_manager)
+            # 检查是否已经挂载
+            if wim_file.get("mount_status", False):
+                self.wim_ops_common.show_info("提示", f"WIM映像 {wim_file['name']} 已经挂载，无需重复挂载。")
+                self.dialog.refresh_wim_list()
+                return
+
+            # 检查管理员权限
+            if not self.wim_ops_common.check_admin_privileges():
+                self.wim_ops_common.request_admin_restart(
+                    "需要管理员权限",
+                    "WIM挂载操作需要管理员权限。\n\n是否以管理员身份重新启动程序？"
+                )
+                return
+
+            # 使用带进度条的操作执行
+            self.execute_wim_operation("mount", wim_file["build_dir"], wim_file_path=wim_file["path"])
 
         except Exception as e:
             log_error(e, "挂载WIM映像")
@@ -80,8 +95,15 @@ class WIMOperations:
                 self.wim_ops_common.show_warning("提示", "请先选择要卸载的WIM映像文件")
                 return
 
-            # 使用共享功能执行卸载操作
-            self.wim_ops_common.unmount_wim_with_progress(wim_file, self.wim_manager, commit)
+            # 检查是否已经卸载
+            if not wim_file.get("mount_status", False):
+                self.wim_ops_common.show_info("提示", f"WIM映像 {wim_file['name']} 未挂载，无需卸载。")
+                self.dialog.refresh_wim_list()
+                return
+
+            # 使用带进度条的操作执行
+            operation_type = "unmount_commit" if commit else "unmount_discard"
+            self.execute_wim_operation(operation_type, wim_file["build_dir"], commit=commit)
 
         except Exception as e:
             action = "保存更改" if commit else "放弃更改"
@@ -347,7 +369,7 @@ class WIMOperations:
     def execute_wim_operation(self, operation: str, build_dir: Path, **kwargs):
         """执行WIM操作"""
         try:
-            # 创建进度对话框
+            # 操作名称映射
             operation_names = {
                 "mount": "挂载WIM映像",
                 "unmount_commit": "卸载WIM映像(保存更改)",
@@ -358,32 +380,108 @@ class WIMOperations:
             }
 
             operation_name = operation_names.get(operation, operation)
-            progress = QProgressDialog(f"正在{operation_name}...", "取消", 0, 100, self.dialog)
-            progress.setWindowTitle(operation_name)
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
 
-            # 创建操作线程
-            self.operation_thread = WIMOperationThread(
-                self.config_manager,
-                self.adk_manager,
-                self.parent,
-                operation,
-                build_dir,
-                **kwargs
+            # 创建新的进度对话框
+            progress_dialog = ProgressDialog(
+                self.dialog,
+                title=operation_name,
+                show_log=True,
+                can_cancel=True
             )
-            self.operation_thread.progress_signal.connect(progress.setValue)
-            self.operation_thread.log_signal.connect(lambda msg: self.parent.log_message(f"[WIM] {msg}"))
-            self.operation_thread.finished_signal.connect(self.dialog.on_operation_finished)
-            self.operation_thread.error_signal.connect(self.dialog.on_operation_error)
+            progress_dialog.set_title(f"正在{operation_name}")
+            progress_dialog.set_current_operation("准备开始...")
+            progress_dialog.show()
 
-            # 保存进度对话框
-            self.dialog.current_progress = progress
+            # 获取WIM管理器
+            wim_manager = self.wim_manager
+
+            # 创建操作线程（使用新的WIMOperationThread）
+            if operation in ["mount", "unmount_commit", "unmount_discard"]:
+                # 对于挂载和卸载操作，使用专门的进度对话框
+                if operation == "mount":
+                    operation_thread = WIMOperationThread(
+                        'mount', wim_manager, build_dir,
+                        kwargs.get('wim_file_path')
+                    )
+                else:  # unmount operations
+                    commit_changes = operation == "unmount_commit"
+                    operation_thread = WIMOperationThread(
+                        'unmount', wim_manager, build_dir, commit_changes
+                    )
+            else:
+                # 对于其他操作，使用原有的线程
+                operation_thread = OriginalWIMOperationThread(
+                    self.config_manager,
+                    self.adk_manager,
+                    self.parent,
+                    operation,
+                    build_dir,
+                    **kwargs
+                )
+
+            # 连接信号
+            if operation in ["mount", "unmount_commit", "unmount_discard"]:
+                # 新的WIMOperationThread信号
+                operation_thread.progress.connect(progress_dialog.set_progress)
+                operation_thread.log.connect(progress_dialog.add_log)
+                operation_thread.finished.connect(
+                    lambda success, msg: self._on_operation_finished(progress_dialog, success, msg, operation)
+                )
+                progress_dialog.cancelled.connect(operation_thread.cancel)
+            else:
+                # 原有的WIMOperationThread信号
+                operation_thread.progress_signal.connect(progress_dialog.set_progress)
+                operation_thread.log_signal.connect(progress_dialog.add_log)
+                operation_thread.finished_signal.connect(
+                    lambda success, msg: self._on_operation_finished(progress_dialog, success, msg, operation)
+                )
+                operation_thread.error_signal.connect(
+                    lambda error_msg: self._on_operation_finished(progress_dialog, False, error_msg, operation)
+                )
+
+            # 线程完成后删除
+            if operation in ["mount", "unmount_commit", "unmount_discard"]:
+                operation_thread.finished.connect(operation_thread.deleteLater)
+            else:
+                operation_thread.finished_signal.connect(operation_thread.deleteLater)
+
+            # 保存进度对话框引用
+            self.dialog.current_progress_dialog = progress_dialog
             self.dialog.current_operation = operation_name
 
             # 启动线程
-            self.operation_thread.start()
+            operation_thread.start()
 
         except Exception as e:
             log_error(e, f"执行WIM操作: {operation}")
             QMessageBox.critical(self.dialog, "错误", f"执行WIM操作时发生错误: {str(e)}")
+
+    def _on_operation_finished(self, progress_dialog, success, message, operation):
+        """操作完成回调"""
+        try:
+            progress_dialog.set_completed(success, message)
+
+            if success:
+                # 刷新列表
+                self.dialog.refresh_wim_list()
+
+                # 显示成功消息
+                if operation in ["mount", "unmount_commit", "unmount_discard"]:
+                    QMessageBox.information(
+                        self.dialog,
+                        "操作成功",
+                        f"{message}"
+                    )
+                    self.parent.log_message(f"WIM操作成功: {message} [WIM操作]")
+            else:
+                # 显示错误消息
+                QMessageBox.critical(
+                    self.dialog,
+                    "操作失败",
+                    f"操作失败: {message}"
+                )
+                self.parent.log_message(f"WIM操作失败: {message} [WIM操作]")
+
+        except Exception as e:
+            log_error(e, "处理操作完成回调")
+            QMessageBox.critical(self.dialog, "错误", f"处理操作结果时发生错误: {str(e)}")
