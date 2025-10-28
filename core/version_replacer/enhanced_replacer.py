@@ -836,7 +836,10 @@ class EnhancedVersionReplacer:
             if output_path.exists():
                 self._log(f"删除已存在的WIN10REPLACED目录: {output_path}", "info")
 
-                # 先尝试卸载可能的挂载点（失败不影响后续流程）
+                # 强制清理所有可能的挂载点和目录
+                self._log("强制清理WIN10REPLACED目录和挂载点", "info")
+
+                # 先尝试卸载所有可能的挂载点
                 mount_points = [
                     output_path / "mount",
                     output_path / "WinPE" / "mount"
@@ -844,22 +847,57 @@ class EnhancedVersionReplacer:
 
                 for mount_point in mount_points:
                     if mount_point.exists():
-                        self._log(f"尝试卸载挂载点: {mount_point}", "info")
+                        self._log(f"强制清理挂载点: {mount_point}", "info")
                         try:
-                            # 使用dism卸载
+                            # 尝试dism卸载
                             dism_result = self.run_dism_command(
                                 ["/Unmount-Wim", f"/MountDir:{mount_point}", "/Discard"],
-                                "卸载WIM"
+                                "强制卸载WIM"
                             )
                             if dism_result[0]:
-                                self._log(f"成功卸载: {mount_point}", "success")
+                                self._log(f"DISM卸载成功: {mount_point}", "success")
                             else:
-                                self._log(f"卸载失败，但继续流程: {mount_point} - {dism_result[1]}", "warning")
+                                self._log(f"DISM卸载失败: {mount_point} - {dism_result[1]}", "warning")
                         except Exception as e:
-                            self._log(f"卸载异常，但继续流程: {mount_point} - {str(e)}", "warning")
+                            self._log(f"DISM卸载异常: {mount_point} - {str(e)}", "warning")
 
-                # 删除目录
-                shutil.rmtree(output_path, ignore_errors=True)
+                        # 无论卸载是否成功，都尝试删除目录
+                        try:
+                            import os
+                            if os.name == 'nt':  # Windows
+                                # 在Windows上使用rmdir /s /q强制删除
+                                import subprocess
+                                result = subprocess.run(
+                                    ['cmd', '/c', 'rmdir', '/s', '/q', str(mount_point)],
+                                    capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+                                )
+                                if result.returncode == 0:
+                                    self._log(f"Windows强制删除成功: {mount_point}", "success")
+                                else:
+                                    self._log(f"Windows强制删除失败: {mount_point}", "warning")
+                            else:
+                                # 在Linux/Mac上使用rm -rf
+                                subprocess.run(['rm', '-rf', str(mount_point)], check=False)
+                        except Exception as e:
+                            self._log(f"强制删除失败: {mount_point} - {str(e)}", "warning")
+
+                # 最终删除整个WIN10REPLACED目录
+                try:
+                    import os
+                    if os.name == 'nt':  # Windows
+                        result = subprocess.run(
+                            ['cmd', '/c', 'rmdir', '/s', '/q', str(output_path)],
+                            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        if result.returncode == 0:
+                            self._log(f"Windows强制删除目录成功: {output_path}", "success")
+                        else:
+                            self._log(f"Windows强制删除目录失败: {output_path}", "warning")
+                    else:
+                        subprocess.run(['rm', '-rf', str(output_path)], check=False)
+                        self._log(f"Linux删除目录: {output_path}", "success")
+                except Exception as e:
+                    self._log(f"删除目录失败: {output_path} - {str(e)}", "error")
 
             # 使用copype命令直接在WinPE_amd64目录中创建WIN10REPLACED
             # 就像创建WinPE_20251028_235101那样：
