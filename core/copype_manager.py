@@ -153,7 +153,8 @@ class CopypeManager:
             self.logger.info(f"copype进度 {percent}%: {message}")
             print(f"{percent}%: {message} [copype进度]")
 
-        callback = callback or default_progress_callback
+        # 使用传入的回调或默认回调
+        effective_callback = progress_callback or default_progress_callback
 
         # 实时监控输出
         output_lines = []
@@ -170,7 +171,7 @@ class CopypeManager:
                     if current_files > last_progress:
                         progress = min(current_files * 100 // estimated_total_files, 95)
                         last_progress = progress
-                        callback(progress, f"已复制 {current_files} 个文件")
+                        effective_callback(progress, f"已复制 {current_files} 个文件")
 
                 # 监控标准输出
                 line = process.stdout.readline()
@@ -185,13 +186,13 @@ class CopypeManager:
                         print(f"{line} [copype]")
 
                         # 解析进度阶段
-                        self._parse_copype_stage(line, callback, start_time)
+                        self._parse_copype_stage(line, effective_callback, start_time)
 
                         # 更新ETA（每5秒更新一次）
                         elapsed = time.time() - start_time
                         if elapsed - last_eta_update > 5 and last_progress > 0:
                             eta_seconds = (elapsed * 100 // last_progress) - elapsed
-                            callback(last_progress, f"预计剩余时间: {eta_seconds:.0f}秒")
+                            effective_callback(last_progress, f"预计剩余时间: {eta_seconds:.0f}秒")
                             last_eta_update = elapsed
 
                 time.sleep(0.1)
@@ -201,7 +202,7 @@ class CopypeManager:
             success = return_code == 0
 
             # 完成进度
-            callback(100, "copype操作完成")
+            effective_callback(100, "copype操作完成")
 
             # 统计最终结果
             final_files = self._count_files(output_path) if output_path.exists() else 0
