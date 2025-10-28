@@ -108,6 +108,12 @@ class CopypeManager:
             working_dir.mkdir(parents=True, exist_ok=True)
             output_path = working_dir / output_dir
 
+            # 删除已存在的输出目录（copype要求目标目录不能存在）
+            if output_path.exists():
+                self.logger.info(f"删除已存在的输出目录: {output_path}")
+                shutil.rmtree(output_path, ignore_errors=True)
+                print(f"删除已存在的目录: {output_path} [copype]")
+
             # 使用进度回调（如果提供）或默认回调
             callback = progress_callback or self.progress_callback
 
