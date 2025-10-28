@@ -754,9 +754,9 @@ class UICreators:
 
     def create_version_replace_tab(self):
         """创建版本替换标签页"""
-        from ui.main_window.version_replacer_widget import VersionReplacerWidget
+        from ui.main_window.enhanced_version_replacer_widget import EnhancedVersionReplacerWidget
 
-        version_replace_widget = VersionReplacerWidget(parent=self.main_window)
+        version_replace_widget = EnhancedVersionReplacerWidget(parent=self.main_window)
         self.main_window.tab_widget.addTab(version_replace_widget, "版本替换")
 
     def create_status_bar(self):

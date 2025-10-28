@@ -61,7 +61,6 @@
 - `core/adk_manager.py`: ISO创建PowerShell调用修复
 - `core/version_replacer.py`: WIM操作统一化、路径修复增强
 - `core/version_replacer/enhanced_replacer.py`: 新增路径修复功能
-- `ui/main_window/version_replacer_widget.py`: 一键ISO按钮、进度修复
 - `ui/main_window/enhanced_version_replacer_widget.py`: 一键ISO按钮、进度修复
 - `docs/sj.md`: 技术修复记录文档
 
