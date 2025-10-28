@@ -835,7 +835,8 @@ class EnhancedVersionReplacer:
             from core.copype_manager import CopypeManager
             copype_manager = CopypeManager(self.adk, self._update_progress)
 
-            copype_success, message, workspace_path = copype_manager.create_winpe_workspace(
+            # 直接在WIN10REPLACED目录中创建WinPE结构，不在WinPE子目录中
+            copype_success, message, workspace_path = copype_manager.create_winpe_workspace_direct(
                 "amd64",
                 output_path,
                 progress_callback=self._update_progress
