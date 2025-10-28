@@ -98,6 +98,9 @@ class EnhancedVersionReplacerWidget(QWidget):
 
         # 初始化UI
         self.init_ui()
+
+        # 设置配置变更监听（必须在setup_connections之前）
+        self.setup_config_watchers()
         self.setup_connections()
 
         # 自动加载配置（优先从JSON文件加载）
@@ -106,9 +109,6 @@ class EnhancedVersionReplacerWidget(QWidget):
             if not self.load_config_from_json_file():
                 # 如果JSON文件不存在或加载失败，则从系统配置加载
                 self.load_config_from_system()
-
-        # 设置配置变更监听
-        self.setup_config_watchers()
 
         self.init_enhanced_version_replacer()
 
