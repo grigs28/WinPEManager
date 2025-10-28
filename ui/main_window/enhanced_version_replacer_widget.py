@@ -19,7 +19,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal, Qt, QDateTime, QTimer
 from PyQt5.QtGui import QFont, QTextCharFormat, QColor
 
-from core.version_replacer import EnhancedVersionReplacer, create_version_replace_config
+from core.version_replacer.enhanced_replacer import EnhancedVersionReplacer
+from core.version_replacer import create_version_replace_config
 from core.config_manager import ConfigManager
 from utils.logger import get_logger
 
