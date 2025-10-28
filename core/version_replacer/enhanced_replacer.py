@@ -899,69 +899,31 @@ class EnhancedVersionReplacer:
                 except Exception as e:
                     self._log(f"删除目录失败: {output_path} - {str(e)}", "error")
 
-            # 使用copype命令直接在WinPE_amd64目录中创建WIN10REPLACED
-            # 就像创建WinPE_20251028_235101那样：
-            # cd D:\APP\WinPEManager\WinPE_amd64
-            # copype amd64 WIN10REPLACED
-            parent_dir = output_path.parent  # WinPE_amd64
-            copype_cmd = self.adk.get_copype_path()
-            if not copype_cmd:
-                return False, "找不到copype命令", result
+                # 等待系统释放WIM锁定
+                self._log("等待系统释放WIM锁定...", "info")
+                import time
+                time.sleep(3)  # 等待3秒让系统完全释放
 
-            self._log(f"执行copype命令: copype amd64 WIN10REPLACED", "info")
-            self._log(f"工作目录: {parent_dir}", "info")
+            # 使用与"开始构建winpe"相同的copype方法
+            self._log("使用ADK管理器的copype命令创建WIN10REPLACED", "info")
 
-            # 使用subprocess直接运行copype命令
-            import subprocess
-            import os
+            # 使用ADK管理器的copype命令（就像"开始构建winpe"那样）
+            success, stdout, stderr = self.adk.run_copype_command_legacy(
+                "amd64",
+                output_path,  # 直接在WinPE_amd64目录下创建WIN10REPLACED
+                capture_output=True
+            )
 
-            env = os.environ.copy()
-            env['PATH'] = str(copype_cmd.parent) + os.pathsep + env['PATH']
-
-            try:
-                process = subprocess.Popen(
-                    [str(copype_cmd), "amd64", "WIN10REPLACED"],
-                    cwd=parent_dir,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    env=env
-                )
-
-                # 监控输出
-                while True:
-                    line = process.stdout.readline()
-                    if not line:
-                        break
-                    line = line.strip()
-                    if line:
-                        self._log(f"[copype] {line}", "info")
-                        # 简单的进度解析
-                        if "Copying" in line:
-                            self._update_progress(30, "正在复制文件...")
-                        elif "Mounting" in line:
-                            self._update_progress(70, "挂载WIM文件...")
-                        elif "Unmounting" in line:
-                            self._update_progress(90, "卸载WIM文件...")
-
-                return_code = process.wait()
-                if return_code == 0:
-                    self._log("copype执行成功", "success")
-                    copype_success = True
-                    message = "copype执行成功"
-                    workspace_path = output_path
-                else:
-                    self._log(f"copype执行失败，返回码: {return_code}", "error")
-                    copype_success = False
-                    message = f"copype执行失败，返回码: {return_code}"
-                    workspace_path = output_path
-
-            except Exception as e:
-                self._log(f"执行copype命令失败: {str(e)}", "error")
+            if success:
+                self._log("copype执行成功", "success")
+                copype_success = True
+                message = "copype执行成功"
+                workspace_path = output_path
+            else:
+                self._log(f"copype执行失败", "error")
+                self._log(f"错误输出: {stderr}", "error")
                 copype_success = False
-                message = f"执行copype命令失败: {str(e)}"
+                message = f"copype执行失败: {stderr}"
                 workspace_path = output_path
 
             if not copype_success:
