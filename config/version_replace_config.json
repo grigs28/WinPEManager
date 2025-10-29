@@ -1,19 +1,9 @@
 {
-  "version": "1.0",
-  "created_time": "2025-10-27T23:52:40.300167",
-  "paths": {
-    "source_dir": "D:/APP/WinPEManager/WinPE_amd64/0WIN11PE",
-    "target_dir": "D:/APP/WinPEManager/WinPE_amd64/0WIN10OLD",
-    "output_dir": "D:/APP/WinPEManager/WinPE_amd64/WIN10REPLACED"
-  },
-  "migration_options": {
-    "migrate_external_programs": true,
-    "migrate_startup_scripts": true,
-    "migrate_drivers": true,
-    "migrate_custom_components": true,
-    "preserve_source_structure": true,
-    "replace_core_files": false,
-    "update_configurations": true
-  },
-  "description": "WinPE版本替换配置文件"
+  "source_dir": "D:\\APP\\WinPEManager\\WinPE_amd64\\0WIN11PE",
+  "target_dir": "D:\\APP\\WinPEManager\\WinPE_amd64\\0WIN10OLD",
+  "output_dir": "D:\\APP\\WinPEManager\\WinPE_amd64\\WIN10REPLACED",
+  "use_dism": true,
+  "deep_analysis": true,
+  "copy_external": true,
+  "verify_after_copy": false
 }
